@@ -60,7 +60,7 @@ BOLL_STD         = 2.0          # number of std devs for bands
 TREND_EMA_PERIOD = 20           # 1d EMA for trend filter
 
 # ── Auto-tuning ───────────────────────────────────────────────────────────────
-AUTO_TUNE = False              # True = grid search; False = single run with above params
+AUTO_TUNE = True               # True = grid search; False = single run with above params
 
 TUNE_SPACE = {
     "LEVERAGE":           [50],
