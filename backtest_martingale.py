@@ -13,6 +13,12 @@ Martingale:
   - MAX_LEVELS hit: close everything, accept loss
 """
 
+# ── Must be set BEFORE numpy/pandas import to prevent fork deadlock ───────────
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import json
 import pandas as pd
 import numpy as np
@@ -23,6 +29,9 @@ from tqdm import tqdm
 DATA_DIR    = Path("data")
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
+
+# ── Raw data cache (populated by preload_data() before multiprocessing Pool) ──
+_RAW_DATA: dict = {}  # {coin: (df_1h, df_1d)}
 BEST_PARAMS_FILE = RESULTS_DIR / "best_params.json"
 
 # ── Parameters ────────────────────────────────────────────────────────────────
@@ -33,10 +42,15 @@ LEVERAGE        = 50
 BASE_RISK       = 0.05         # 1% of capital per level (equal sizing, no doubling)
 MAX_LEVELS      = 10            # max martingale adds (loss side)
 MAX_PYRAMID_LEVELS = 10          # max pyramid adds (profit side)
+PYRAMID_MIN_PROFIT_RATE = 0.5   # min unrealized profit (as multiple of one level margin) to allow pyramid add
+                               # e.g. 0.5 = must be up ≥ 0.5 × notional/LEVERAGE before adding
 GRID_STEP_RATE  = 0.02          # price drop % to trigger next loss-side add (e.g. 0.02 = 2%)
                                # independent of LEVERAGE; default = 1/LEVERAGE
-TP_MARGIN_RATE  = 1.00         # TP when profit reaches 50% of total margin used
-                               # price move needed = TP_MARGIN_RATE / LEVERAGE
+TP_MARGIN_RATE  = 1.00         # first TP tier: profit = TP_MARGIN_RATE × margin → price move = rate/LEVERAGE
+TP_SCALE_LEVELS = 1            # 1 = single full close; N = N equal partial TPs
+                               # e.g. 3: close 1/3 at TP1, 1/3 at TP2, 1/3 at TP3
+TP_SCALE_MULT   = 2.0          # each subsequent TP tier multiplier on price target
+                               # e.g. 2.0: TP1=1×, TP2=2×, TP3=4× TP_MARGIN_RATE/LEVERAGE
 SL_CAPITAL_RATE = 0.50         # SL when loss reaches X% of total capital
                                # e.g. 0.10 = stop when down $1000 on $10000 account
 
@@ -46,15 +60,18 @@ BOLL_STD         = 2.0          # number of std devs for bands
 TREND_EMA_PERIOD = 20           # 1d EMA for trend filter
 
 # ── Auto-tuning ───────────────────────────────────────────────────────────────
-AUTO_TUNE = True               # True = grid search; False = single run with above params
+AUTO_TUNE = False              # True = grid search; False = single run with above params
 
 TUNE_SPACE = {
     "LEVERAGE":           [50],
     "BASE_RISK":          [0.025, 0.05],
     "MAX_LEVELS":         [10],
     "MAX_PYRAMID_LEVELS": [10],
+    "PYRAMID_MIN_PROFIT_RATE": [0.0, 0.5, 1.0],
     "GRID_STEP_RATE":     [0.02, 0.05],
     "TP_MARGIN_RATE":     [0.50, 1.00, 3.00],
+    "TP_SCALE_LEVELS":    [1, 3],
+    "TP_SCALE_MULT":      [2.0],
     "SL_CAPITAL_RATE":    [0.20, 0.50],
     "BOLL_PERIOD":        [14, 20],
     "BOLL_STD":           [1.5, 2.0, 2.5],
@@ -101,16 +118,33 @@ class Martin:
         self.entries        = [(price, notional)]
         self.grid_step      = notional / LEVERAGE     # 1× margin in $ = 1/leverage price move
         self.capital        = capital                 # capital at entry (for SL calc)
+        self.tp_tier        = 0                       # current TP tier (0-based)
 
     def avg_entry(self) -> float:
         total_n = sum(n for _, n in self.entries)
         return sum(p * n for p, n in self.entries) / total_n
 
     def tp(self) -> float:
-        """TP price: profit = TP_MARGIN_RATE × total_margin, so price move = TP_MARGIN_RATE/LEVERAGE."""
+        """Current tier TP price. Tier 0 = TP_MARGIN_RATE, tier k = TP_MARGIN_RATE * MULT^k."""
         avg  = self.avg_entry()
-        move = TP_MARGIN_RATE / LEVERAGE
+        mult = (TP_SCALE_MULT ** self.tp_tier) if TP_SCALE_LEVELS > 1 else 1.0
+        move = TP_MARGIN_RATE * mult / LEVERAGE
         return avg * (1 + move) if self.direction == "long" else avg * (1 - move)
+
+    def partial_close(self, exit_price: float) -> float:
+        """Close 1/TP_SCALE_LEVELS of original position for this tier (last tier closes all).
+        Returns realized PnL. Updates entries in-place."""
+        is_last  = (self.tp_tier >= TP_SCALE_LEVELS - 1)
+        fraction = 1.0 if is_last else 1.0 / (TP_SCALE_LEVELS - self.tp_tier)
+        pnl = 0.0
+        for i, (entry_p, notional) in enumerate(self.entries):
+            close_n = notional * fraction
+            pct     = ((exit_price - entry_p) / entry_p if self.direction == "long"
+                       else (entry_p - exit_price) / entry_p)
+            pnl    += close_n * pct - close_n * FEE_RATE * 2
+            self.entries[i] = (entry_p, notional * (1.0 - fraction))
+        self.tp_tier += 1
+        return pnl
 
     def next_add_price(self) -> float:
         """Price at which to add next level: last entry ± GRID_STEP_RATE."""
@@ -139,11 +173,10 @@ class Martin:
         return True
 
     def add_pyramid_level(self, price: float) -> bool:
-        """Pyramid add on profit side: decreasing notional."""
+        """Pyramid add on profit side: equal notional (same size as base level)."""
         if self.profit_level >= MAX_PYRAMID_LEVELS:
             return False
-        size = self.notional / (self.profit_level + 2)  # 1/2, 1/3, 1/4 ...
-        self.entries.append((price, size))
+        self.entries.append((price, self.notional))
         self.profit_level += 1
         return True
 
@@ -157,13 +190,26 @@ class Martin:
 
 
 # ── Backtest ──────────────────────────────────────────────────────────────────
+def preload_data():
+    """Load all raw CSV files into _RAW_DATA. Called once in main process;
+    worker processes inherit the data via fork (no repeated disk reads)."""
+    global _RAW_DATA
+    for _, coin in COINS:
+        _RAW_DATA[coin] = (
+            pd.read_csv(DATA_DIR / f"{coin}_futures_1h.csv", index_col=0, parse_dates=True),
+            pd.read_csv(DATA_DIR / f"{coin}_futures_1d.csv", index_col=0, parse_dates=True),
+        )
+
+
 def run_backtest(symbol: str, coin: str):
     print(f"\n{'='*50}")
     print(f"  {symbol}")
     print(f"{'='*50}")
 
-    df_1h = pd.read_csv(DATA_DIR / f"{coin}_futures_1h.csv", index_col=0, parse_dates=True)
-    df_1d = pd.read_csv(DATA_DIR / f"{coin}_futures_1d.csv", index_col=0, parse_dates=True)
+    df_1h, df_1d = _RAW_DATA.get(coin) or (
+        pd.read_csv(DATA_DIR / f"{coin}_futures_1h.csv", index_col=0, parse_dates=True),
+        pd.read_csv(DATA_DIR / f"{coin}_futures_1d.csv", index_col=0, parse_dates=True),
+    )
     df = prepare(df_1h, df_1d)
 
     capital  = float(INITIAL_CAPITAL)
@@ -193,8 +239,10 @@ def run_backtest(symbol: str, coin: str):
             hit_sl   = (row["low"]  <= hard_sl   if martin.direction == "long" else row["high"] >= hard_sl)
             hit_add  = (martin.level < MAX_LEVELS and
                         (row["low"] <= next_add if martin.direction == "long" else row["high"] >= next_add))
-            # pyramid: in profit + BB mid cross in same direction
-            in_profit = martin.pnl(row["close"]) > 0
+            # pyramid: profit ≥ MIN_PROFIT_RATE × one_margin + BB mid cross in same direction
+            _pnl = martin.pnl(row["close"])
+            _one_margin = martin.notional / LEVERAGE
+            in_profit = _pnl >= PYRAMID_MIN_PROFIT_RATE * _one_margin
             hit_pyramid = (
                 martin.profit_level < MAX_PYRAMID_LEVELS and in_profit and
                 ((martin.direction == "long"  and row["mid_cross_up"]) or
@@ -202,25 +250,27 @@ def run_backtest(symbol: str, coin: str):
             )
 
             # track unrealized loss ratio vs current capital this bar
-            _unrealized = martin.pnl(row["close"])
-            if _unrealized < 0:
-                peak_loss_ratio = max(peak_loss_ratio, -_unrealized / capital)
+            if _pnl < 0:
+                peak_loss_ratio = max(peak_loss_ratio, -_pnl / capital)
 
             if hit_tp:
-                pnl      = martin.pnl(tp_price)
-                pnl      = max(pnl, -capital)
-                capital += pnl
-                peak_cap = max(peak_cap, capital)
+                partial_pnl  = martin.partial_close(tp_price)
+                partial_pnl  = max(partial_pnl, -capital)
+                capital     += partial_pnl
+                peak_cap     = max(peak_cap, capital)
+                is_last_tier = (martin.tp_tier >= TP_SCALE_LEVELS)
+                reason       = "TP" if is_last_tier else f"TP{martin.tp_tier}"
                 trades.append({"exit_time": ts, "direction": martin.direction,
                                 "level": martin.level, "profit_level": martin.profit_level,
-                                "exit_reason": "TP",
-                                "notional": martin.entries[0][1],
+                                "exit_reason": reason,
+                                "notional": martin.notional,
                                 "entry_capital": martin.capital,
                                 "peak_loss_ratio": round(peak_loss_ratio, 6),
-                                "pnl_usdt": round(pnl, 4), "capital": round(capital, 4),
+                                "pnl_usdt": round(partial_pnl, 4), "capital": round(capital, 4),
                                 "drawdown": round((peak_cap - capital) / peak_cap, 6)})
-                peak_loss_ratio = 0.0
-                martin = None
+                if is_last_tier:
+                    peak_loss_ratio = 0.0
+                    martin = None
 
             elif hit_sl:
                 pnl      = martin.pnl(hard_sl)
@@ -277,7 +327,7 @@ def run_backtest(symbol: str, coin: str):
     max_hold_ratio = t["peak_loss_ratio"].max()
 
     print(f"  Trades        : {n}  ({wins}W / {losses}L,  {win_rate:.1f}%)")
-    print(f"  TP / MAX_SL   : {(t['exit_reason']=='TP').sum()} / {(t['exit_reason']=='MAX_SL').sum()}")
+    print(f"  TP / MAX_SL   : {t['exit_reason'].str.startswith('TP').sum()} / {(t['exit_reason']=='MAX_SL').sum()}")
     print(f"  Level dist    : {t['level'].value_counts().sort_index().to_dict()}")
     print(f"  Pyramid dist  : {t['profit_level'].value_counts().sort_index().to_dict()}")
     print(f"  Avg win/loss  : ${avg_win:.2f} / ${avg_loss:.2f}")
@@ -295,8 +345,10 @@ def run_backtest(symbol: str, coin: str):
 def current_params() -> dict:
     return {
         "LEVERAGE": LEVERAGE, "BASE_RISK": BASE_RISK, "MAX_LEVELS": MAX_LEVELS,
-        "MAX_PYRAMID_LEVELS": MAX_PYRAMID_LEVELS, "GRID_STEP_RATE": GRID_STEP_RATE,
-        "TP_MARGIN_RATE": TP_MARGIN_RATE, "SL_CAPITAL_RATE": SL_CAPITAL_RATE,
+        "MAX_PYRAMID_LEVELS": MAX_PYRAMID_LEVELS,
+        "PYRAMID_MIN_PROFIT_RATE": PYRAMID_MIN_PROFIT_RATE, "GRID_STEP_RATE": GRID_STEP_RATE,
+        "TP_MARGIN_RATE": TP_MARGIN_RATE, "TP_SCALE_LEVELS": TP_SCALE_LEVELS,
+        "TP_SCALE_MULT": TP_SCALE_MULT, "SL_CAPITAL_RATE": SL_CAPITAL_RATE,
         "BOLL_PERIOD": BOLL_PERIOD, "BOLL_STD": BOLL_STD,
         "TREND_EMA_PERIOD": TREND_EMA_PERIOD,
     }
@@ -341,48 +393,69 @@ def _apply_params(p: dict):
         g[k] = v
 
 
+def _worker_init():
+    """Initializer for each spawn worker: load CSV data once per process."""
+    global _RAW_DATA
+    for _, coin in COINS:
+        _RAW_DATA[coin] = (
+            pd.read_csv(DATA_DIR / f"{coin}_futures_1h.csv", index_col=0, parse_dates=True),
+            pd.read_csv(DATA_DIR / f"{coin}_futures_1d.csv", index_col=0, parse_dates=True),
+        )
+
+
+def _tune_worker(p: dict):
+    """Worker: apply params in this subprocess, run backtest, return results."""
+    _apply_params(p)
+    avg_ret, coin_returns, coin_hold_ratios = run_once(verbose=False)
+    return p, avg_ret, coin_returns, coin_hold_ratios, current_params()
+
+
 def auto_tune():
     import itertools
+    import multiprocessing as mp
     keys   = list(TUNE_SPACE.keys())
     values = list(TUNE_SPACE.values())
-    combos = list(itertools.product(*values))
+    combos = [dict(zip(keys, c)) for c in itertools.product(*values)]
     total  = len(combos)
+    n_workers = min(16, max(1, mp.cpu_count() - 1))
     print(f"\n{'='*60}")
     print(f"  AUTO-TUNE  |  {total} combinations  |  {len(COINS)} coins each")
+    print(f"  Workers    |  {n_workers} parallel processes (spawn)")
     print(f"{'='*60}")
 
     best: dict = json.loads(BEST_PARAMS_FILE.read_text()) if BEST_PARAMS_FILE.exists() else {}
-    best_avg   = max((v.get("best_return", float("-inf")) for v in best.values()), default=float("-inf"))
 
-    pbar = tqdm(combos, total=total, desc="AUTO-TUNE", unit="combo", ncols=90)
-    for idx, combo in enumerate(pbar, 1):
-        p = dict(zip(keys, combo))
-        _apply_params(p)
+    ctx  = mp.get_context("spawn")
+    done = 0
+    pbar = tqdm(total=total, desc="AUTO-TUNE", unit="combo", ncols=90)
+    with ctx.Pool(processes=n_workers, initializer=_worker_init) as pool:
+        for p, avg_ret, coin_returns, coin_hold_ratios, snapped_params in \
+                pool.imap_unordered(_tune_worker, combos, chunksize=1):
+            done += 1
+            pbar.update(1)
 
-        avg_ret, coin_returns, coin_hold_ratios = run_once(verbose=False)
+            updated = []
+            for coin, ret in coin_returns.items():
+                prev_ret = best.get(coin, {}).get("best_return", float("-inf"))
+                if ret > prev_ret:
+                    best[coin] = {
+                        "best_return": round(ret, 6),
+                        "max_hold_ratio": round(coin_hold_ratios[coin], 6),
+                        "params": snapped_params,
+                    }
+                    updated.append(f"{coin.upper()} {ret*100:.1f}%")
 
-        # per-coin best update
-        updated = []
-        for coin, ret in coin_returns.items():
-            prev_ret = best.get(coin, {}).get("best_return", float("-inf"))
-            if ret > prev_ret:
-                best[coin] = {
-                    "best_return": round(ret, 6),
-                    "max_hold_ratio": round(coin_hold_ratios[coin], 6),
-                    "params": current_params(),
-                }
-                updated.append(f"{coin.upper()} {ret*100:.1f}%")
-
-        if updated:
-            best_avg = max((v.get("best_return", float("-inf")) for v in best.values()), default=float("-inf"))
-            BEST_PARAMS_FILE.write_text(json.dumps(best, indent=2))
-            pbar.write(f"  [{idx:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  ★ {', '.join(updated)}"
-                       f"  | lev={p['LEVERAGE']} risk={p['BASE_RISK']} ml={p['MAX_LEVELS']}"
-                       f" tp={p['TP_MARGIN_RATE']} boll={p['BOLL_PERIOD']}/{p['BOLL_STD']}")
-        elif idx % 50 == 0:
-            pbar.write(f"  [{idx:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  (no improvement)")
+            if updated:
+                BEST_PARAMS_FILE.write_text(json.dumps(best, indent=2))
+                pbar.write(f"  [{done:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  ★ {', '.join(updated)}"
+                           f"  | lev={p['LEVERAGE']} risk={p['BASE_RISK']} ml={p['MAX_LEVELS']}"
+                           f" tp={p['TP_MARGIN_RATE']} boll={p['BOLL_PERIOD']}/{p['BOLL_STD']}")
+            elif done % 50 == 0:
+                pbar.write(f"  [{done:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  (no improvement)")
+    pbar.close()
 
     print(f"\nTuning complete. Best per-coin results in {BEST_PARAMS_FILE}")
+
 
 
 def main():
