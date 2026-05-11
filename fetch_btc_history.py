@@ -20,16 +20,16 @@ LIMIT = 1000                       # candles per request (Binance max)
 
 # symbol -> coin label for filenames
 SYMBOLS = {
-    # "BTC/USDT:USDT": "btc",
-    # "ETH/USDT:USDT": "eth",
-    # "SOL/USDT:USDT": "sol",
+    "BTC/USDT:USDT": "btc",
+    "ETH/USDT:USDT": "eth",
+    "SOL/USDT:USDT": "sol",
     "HYPE/USDT:USDT": "hype",
 }
 
 # timeframe -> how many years back to fetch  (0 = skip)
 TIMEFRAME_YEARS = {
-    "1d": 0,
-    "1h": 0,
+    "1d": 5,
+    "1h": 5,
     "5m": 2,
 }
 

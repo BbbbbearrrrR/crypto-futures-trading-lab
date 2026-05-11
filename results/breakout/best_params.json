@@ -1,0 +1,54 @@
+{
+  "btc": {
+    "best_return": 78.780215,
+    "max_hold_ratio": 0.170479,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.02,
+      "DONCHIAN_PERIOD": 20,
+      "ATR_PERIOD": 14,
+      "SL_MULT": 1.0,
+      "TP_RR": 5.0,
+      "TREND_EMA_PERIOD": 50
+    }
+  },
+  "eth": {
+    "best_return": 86.909926,
+    "max_hold_ratio": 0.199635,
+    "params": {
+      "LEVERAGE": 10,
+      "BASE_RISK": 0.02,
+      "DONCHIAN_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_MULT": 1.0,
+      "TP_RR": 5.0,
+      "TREND_EMA_PERIOD": 50
+    }
+  },
+  "sol": {
+    "best_return": 51.397139,
+    "max_hold_ratio": 0.164605,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.02,
+      "DONCHIAN_PERIOD": 10,
+      "ATR_PERIOD": 7,
+      "SL_MULT": 1.0,
+      "TP_RR": 5.0,
+      "TREND_EMA_PERIOD": 50
+    }
+  },
+  "hype": {
+    "best_return": 1.029137,
+    "max_hold_ratio": 0.061687,
+    "params": {
+      "LEVERAGE": 10,
+      "BASE_RISK": 0.02,
+      "DONCHIAN_PERIOD": 40,
+      "ATR_PERIOD": 14,
+      "SL_MULT": 1.5,
+      "TP_RR": 3.0,
+      "TREND_EMA_PERIOD": 50
+    }
+  }
+}

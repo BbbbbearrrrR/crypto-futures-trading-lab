@@ -123,12 +123,13 @@ def run_backtest(symbol: str, coin: str):
     peak_cap = capital
     trades   = []
 
-    in_trade    = False
-    direction   = None
-    entry_price = 0.0
-    sl_price    = 0.0
-    tp_price    = 0.0
-    notional    = 0.0
+    in_trade       = False
+    direction      = None
+    entry_price    = 0.0
+    sl_price       = 0.0
+    tp_price       = 0.0
+    notional       = 0.0
+    peak_loss_ratio = 0.0
 
     warmup = max(DONCHIAN_PERIOD, ATR_PERIOD) + 2
 
@@ -148,6 +149,12 @@ def run_backtest(symbol: str, coin: str):
             hit_tp = (row["high"] >= tp_price if direction == "long" else row["low"]  <= tp_price)
             hit_sl = (row["low"]  <= sl_price if direction == "long" else row["high"] >= sl_price)
 
+            # track peak unrealized loss ratio this bar
+            worst_pnl = ((row["low"]  - entry_price) / entry_price * notional if direction == "long"
+                         else (entry_price - row["high"]) / entry_price * notional)
+            if worst_pnl < 0:
+                peak_loss_ratio = max(peak_loss_ratio, -worst_pnl / capital)
+
             if hit_tp or hit_sl:
                 exit_price = tp_price if hit_tp else sl_price
                 pct        = ((exit_price - entry_price) / entry_price if direction == "long"
@@ -157,16 +164,18 @@ def run_backtest(symbol: str, coin: str):
                 capital   += pnl
                 peak_cap   = max(peak_cap, capital)
                 trades.append({
-                    "exit_time":   ts,
-                    "direction":   direction,
-                    "entry_price": round(entry_price, 6),
-                    "exit_price":  round(exit_price, 6),
-                    "notional":    round(notional, 4),
-                    "exit_reason": "TP" if hit_tp else "SL",
-                    "pnl_usdt":    round(pnl, 4),
-                    "capital":     round(capital, 4),
-                    "drawdown":    round((peak_cap - capital) / peak_cap, 6),
+                    "exit_time":      ts,
+                    "direction":      direction,
+                    "entry_price":    round(entry_price, 6),
+                    "exit_price":     round(exit_price, 6),
+                    "notional":       round(notional, 4),
+                    "exit_reason":    "TP" if hit_tp else "SL",
+                    "peak_loss_ratio": round(peak_loss_ratio, 6),
+                    "pnl_usdt":       round(pnl, 4),
+                    "capital":        round(capital, 4),
+                    "drawdown":       round((peak_cap - capital) / peak_cap, 6),
                 })
+                peak_loss_ratio = 0.0
                 in_trade = False
 
         # ── Entry ─────────────────────────────────────────────────────────────
@@ -207,15 +216,18 @@ def run_backtest(symbol: str, coin: str):
                 if losses and avg_loss else float("inf"))
     final    = t["capital"].iloc[-1]
 
+    max_hold_ratio = t["peak_loss_ratio"].max()
+
     print(f"  Trades        : {n}  ({wins}W / {losses}L,  {win_rate:.1f}%)")
     print(f"  TP / SL       : {(t['exit_reason']=='TP').sum()} / {(t['exit_reason']=='SL').sum()}")
     print(f"  Avg win/loss  : ${avg_win:.2f} / ${avg_loss:.2f}")
+    print(f"  Max hold ratio : {max_hold_ratio*100:.1f}%  (peak unrealized loss / capital)")
     print(f"  Profit factor : {pf:.2f}")
     print(f"  Total PnL     : ${t['pnl_usdt'].sum():.2f}")
     print(f"  Total return  : {(final - INITIAL_CAPITAL)/INITIAL_CAPITAL*100:.1f}%")
     print(f"  Max drawdown  : {t['drawdown'].max()*100:.1f}%")
     print(f"  Final capital : ${final:.2f}")
-    return t, (final - INITIAL_CAPITAL) / INITIAL_CAPITAL
+    return t, (final - INITIAL_CAPITAL) / INITIAL_CAPITAL, max_hold_ratio
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -228,15 +240,17 @@ def current_params() -> dict:
     }
 
 
-def run_once(verbose: bool = True) -> tuple[float, dict]:
+def run_once(verbose: bool = True) -> tuple[float, dict, dict]:
     coin_returns: dict = {}
+    coin_hold_ratios: dict = {}
     for symbol, coin in COINS:
         result = run_backtest(symbol, coin) if verbose else _run_silent(symbol, coin)
         if result is not None:
-            _, ret = result
+            _, ret, hold_ratio = result
             coin_returns[coin] = ret
+            coin_hold_ratios[coin] = hold_ratio
     avg_ret = sum(coin_returns.values()) / len(coin_returns) if coin_returns else 0.0
-    return avg_ret, coin_returns
+    return avg_ret, coin_returns, coin_hold_ratios
 
 
 def _run_silent(symbol: str, coin: str):
@@ -263,8 +277,8 @@ def _worker_init():
 
 def _tune_worker(p: dict):
     _apply_params(p)
-    avg_ret, coin_returns = run_once(verbose=False)
-    return p, avg_ret, coin_returns, current_params()
+    avg_ret, coin_returns, coin_hold_ratios = run_once(verbose=False)
+    return p, avg_ret, coin_returns, coin_hold_ratios, current_params()
 
 
 def auto_tune():
@@ -286,7 +300,7 @@ def auto_tune():
     done = 0
     pbar = tqdm(total=total, desc="AUTO-TUNE", unit="combo", ncols=90)
     with ctx.Pool(processes=n_workers, initializer=_worker_init) as pool:
-        for p, avg_ret, coin_returns, snapped_params in \
+        for p, avg_ret, coin_returns, coin_hold_ratios, snapped_params in \
                 pool.imap_unordered(_tune_worker, combos, chunksize=1):
             done += 1
             pbar.update(1)
@@ -297,6 +311,7 @@ def auto_tune():
                 if ret > prev_ret:
                     best[coin] = {
                         "best_return": round(ret, 6),
+                        "max_hold_ratio": round(coin_hold_ratios[coin], 6),
                         "params": snapped_params,
                     }
                     updated.append(f"{coin.upper()} {ret*100:.1f}%")
@@ -326,18 +341,24 @@ def main():
     print(f"Donchian({DONCHIAN_PERIOD})  |  ATR({ATR_PERIOD}) × {SL_MULT} SL  "
           f"|  RR {TP_RR}:1  |  1d EMA{TREND_EMA_PERIOD} trend filter")
 
-    avg_return, coin_returns = run_once(verbose=True)
+    avg_return, coin_returns, coin_hold_ratios = run_once(verbose=True)
     print(f"\nAvg return across coins: {avg_return*100:.1f}%")
 
     best: dict = json.loads(BEST_PARAMS_FILE.read_text()) if BEST_PARAMS_FILE.exists() else {}
 
     for coin, ret in coin_returns.items():
+        hold_ratio = coin_hold_ratios[coin]
         prev_ret = best.get(coin, {}).get("best_return", float("-inf"))
         tag = ""
         if ret > prev_ret:
-            best[coin] = {"best_return": round(ret, 6), "params": current_params()}
+            best[coin] = {
+                "best_return": round(ret, 6),
+                "max_hold_ratio": round(hold_ratio, 6),
+                "params": current_params(),
+            }
             tag = f"  ★ new best (prev {prev_ret*100:.1f}%)"
-        print(f"  {coin.upper()}: return {ret*100:.1f}%  |  best {best[coin]['best_return']*100:.1f}%{tag}")
+        print(f"  {coin.upper()}: return {ret*100:.1f}%  |  hold ratio {hold_ratio*100:.1f}%"
+              f"  |  best {best[coin]['best_return']*100:.1f}%{tag}")
 
     BEST_PARAMS_FILE.write_text(json.dumps(best, indent=2))
     print(f"\nLogs → {RESULTS_DIR}/")

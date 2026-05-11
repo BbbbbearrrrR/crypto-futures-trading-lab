@@ -27,7 +27,7 @@ import sys
 from tqdm import tqdm
 
 DATA_DIR    = Path("data")
-RESULTS_DIR = Path("results")
+RESULTS_DIR = Path("results/martingale")
 RESULTS_DIR.mkdir(exist_ok=True)
 
 # ── Raw data cache (populated by preload_data() before multiprocessing Pool) ──
