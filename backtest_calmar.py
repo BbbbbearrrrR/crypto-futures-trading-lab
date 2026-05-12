@@ -71,26 +71,50 @@ TRAIL_MULT      = 1.0
 # ── Re-entry cooldown ─────────────────────────────────────────────────────────
 COOLDOWN_BARS = 0
 
+# ── Partial TP (split exit) ───────────────────────────────────────────────────
+USE_PARTIAL_TP   = True    # True = close 50 % at +1R, trail the rest
+PARTIAL_TP_R     = 1.0     # first exit at entry + SL_dist × PARTIAL_TP_R
+PARTIAL_TP_FRAC  = 0.5     # fraction of notional to close at first TP
+
+# ── Pullback entry ────────────────────────────────────────────────────────────
+USE_PULLBACK     = False   # True = wait for price to retrace before entering
+PULLBACK_ATR     = 0.5     # enter when price pulls back within X×ATR of level
+PULLBACK_WINDOW  = 6       # bars to wait for the pullback
+
+# ── Time-based exit ───────────────────────────────────────────────────────────
+MAX_HOLD_BARS    = 0       # 0 = disabled; e.g. 72 = close after 72 bars
+
+# ── ADX slope filter ─────────────────────────────────────────────────────────
+ADX_SLOPE_BARS   = 3       # require ADX rising over this many bars (0=disabled)
+
+# ── Max simultaneous open positions ──────────────────────────────────────────
+MAX_OPEN_POS     = 1       # per-coin backtest always has 1 coin, kept for portfolio use
+
 # ── Auto-tuning ───────────────────────────────────────────────────────────────
 AUTO_TUNE        = True
 OPTIMIZE_TARGET  = "calmar"    # "calmar" | "sharpe" | "return"
 MIN_TRADE_COUNT  = 30          # disqualify combos with fewer trades (anti-overfit)
 
 TUNE_SPACE = {
-    "LEVERAGE":          [2, 3, 5],
+    # Narrowed based on best_params.json: keep only values that appeared as optimal
+    "LEVERAGE":          [2, 5],           # 3 never appeared in best
     "USE_VOL_TARGET":    [True, False],
-    "VOL_TARGET":        [0.15, 0.20, 0.30],
+    "VOL_TARGET":        [0.30],           # all best were 0.30
     "DONCHIAN_PERIOD":   [10, 20, 40],
     "ATR_PERIOD":        [7, 14],
     "SL_MULT":           [1.0, 1.5, 2.0],
-    "TP_RR":             [2.0, 3.0, 5.0],
-    "TREND_EMA_PERIOD":  [50, 100, 200],
-    "ADX_MIN":           [0.0, 20.0, 25.0],
+    "TP_RR":             [3.0, 5.0],       # 2.0 never appeared in best
+    "TREND_EMA_PERIOD":  [50, 200],        # 100 never appeared in best
+    "ADX_MIN":           [0.0, 20.0],      # 25.0 never appeared in best
+    "ADX_SLOPE_BARS":    [0, 3],
     "VOL_MULT":          [1.0, 1.5],
     "COOLDOWN_BARS":     [0, 3],
+    "USE_PARTIAL_TP":    [True, False],
+    "PARTIAL_TP_R":      [1.0, 1.5],
+    "USE_PULLBACK":      [True, False],
+    "MAX_HOLD_BARS":     [0, 72],
 }
-# Total: 3×2×3×3×2×3×3×3×3×2×2 = 34992 combinations
-# (VOL_TARGET is ignored when USE_VOL_TARGET=False, effectively fewer unique combos)
+# Total: 2×2×1×3×2×3×2×2×2×2×2×2×2×2×2×3 = 110,592 combinations (vs 1.68M before)
 
 COINS = [
     ("BTC/USDT:USDT", "btc"),
@@ -138,6 +162,12 @@ def prepare(df_1h: pd.DataFrame, df_1d: pd.DataFrame) -> pd.DataFrame:
         df["vol_ok"] = df["volume"] >= df["vol_ma"] * VOL_MULT
     else:
         df["vol_ok"] = True
+
+    # ADX slope: rising over last ADX_SLOPE_BARS bars
+    if ADX_SLOPE_BARS > 0:
+        df["adx_slope_ok"] = df["adx"] > df["adx"].shift(ADX_SLOPE_BARS)
+    else:
+        df["adx_slope_ok"] = True
 
     # Breakout signals
     df["entry_long"]  = df["close"] > df["don_upper"]
@@ -257,14 +287,26 @@ def run_backtest(symbol: str, coin: str):
     direction          = None
     entry_price        = 0.0
     sl_price           = 0.0
-    tp_price           = 0.0
-    notional           = 0.0
+    tp_price           = 0.0      # full TP (used when partial TP already taken or disabled)
+    partial_tp_price   = 0.0      # first partial-TP level
+    partial_done       = False    # whether the first partial exit has been taken
+    notional           = 0.0      # remaining notional after possible partial exit
+    notional_full      = 0.0      # original notional at entry
     peak_loss_ratio    = 0.0
     trail_active       = False
     trail_sl           = 0.0
     cooldown_remaining = 0
+    bars_in_trade      = 0
 
-    warmup = max(DONCHIAN_PERIOD, ATR_PERIOD, ADX_PERIOD, VOL_MA_PERIOD, VOL_LOOKBACK) + 2
+    # pullback-pending state
+    pb_pending    = False         # True = breakout seen, waiting for pullback entry
+    pb_direction  = None
+    pb_level      = 0.0           # don_upper / don_lower at signal bar
+    pb_atr        = 0.0
+    pb_bars_left  = 0
+
+    warmup = max(DONCHIAN_PERIOD, ATR_PERIOD, ADX_PERIOD, VOL_MA_PERIOD,
+                 VOL_LOOKBACK, ADX_SLOPE_BARS) + 2
 
     _iter = tqdm(range(warmup, len(df)), desc=f"{coin.upper()}",
                  unit="bar", file=sys.stdout,
@@ -279,7 +321,10 @@ def run_backtest(symbol: str, coin: str):
 
         # ── Exit ─────────────────────────────────────────────────────────────
         if in_trade:
-            if USE_TRAIL:
+            bars_in_trade += 1
+
+            # update trailing stop
+            if USE_TRAIL or (USE_PARTIAL_TP and partial_done):
                 profit_dist = ((row["close"] - entry_price) if direction == "long"
                                else (entry_price - row["close"]))
                 sl_dist_abs = abs(entry_price - trail_sl)
@@ -292,29 +337,69 @@ def run_backtest(symbol: str, coin: str):
                     else:
                         sl_price = min(sl_price, row["high"] + atr_cur * TRAIL_MULT)
 
-            hit_tp = (row["high"] >= tp_price if direction == "long" else row["low"]  <= tp_price)
-            hit_sl = (row["low"]  <= sl_price if direction == "long" else row["high"] >= sl_price)
+            # ── Partial TP: first exit ────────────────────────────────────────
+            if USE_PARTIAL_TP and not partial_done:
+                hit_partial = (row["high"] >= partial_tp_price if direction == "long"
+                               else row["low"] <= partial_tp_price)
+                if hit_partial:
+                    close_notional = notional_full * PARTIAL_TP_FRAC
+                    pct_p = ((partial_tp_price - entry_price) / entry_price if direction == "long"
+                             else (entry_price - partial_tp_price) / entry_price)
+                    pnl_p = close_notional * pct_p - close_notional * FEE_RATE * 2
+                    capital  += pnl_p
+                    peak_cap  = max(peak_cap, capital)
+                    notional  = notional_full * (1.0 - PARTIAL_TP_FRAC)
+                    partial_done = True
+                    trail_active = True   # immediately start trailing remainder
+                    trail_sl     = sl_price
+                    trades.append({
+                        "exit_time":       ts,
+                        "direction":       direction,
+                        "entry_price":     round(entry_price, 6),
+                        "exit_price":      round(partial_tp_price, 6),
+                        "notional":        round(close_notional, 4),
+                        "exit_reason":     "PARTIAL_TP",
+                        "peak_loss_ratio": round(peak_loss_ratio, 6),
+                        "pnl_usdt":        round(pnl_p, 4),
+                        "capital":         round(capital, 4),
+                        "drawdown":        round((peak_cap - capital) / peak_cap, 6),
+                    })
+                    peak_loss_ratio = 0.0
+
+            # ── Full exit: TP / SL / time ─────────────────────────────────────
+            hit_tp   = (row["high"] >= tp_price if direction == "long" else row["low"]  <= tp_price)
+            hit_sl   = (row["low"]  <= sl_price if direction == "long" else row["high"] >= sl_price)
+            hit_time = (MAX_HOLD_BARS > 0 and bars_in_trade >= MAX_HOLD_BARS)
 
             worst_pnl = ((row["low"]  - entry_price) / entry_price * notional if direction == "long"
                          else (entry_price - row["high"]) / entry_price * notional)
             if worst_pnl < 0:
                 peak_loss_ratio = max(peak_loss_ratio, -worst_pnl / capital)
 
-            if hit_tp or hit_sl:
-                exit_price = tp_price if hit_tp else sl_price
-                pct        = ((exit_price - entry_price) / entry_price if direction == "long"
-                              else (entry_price - exit_price) / entry_price)
-                pnl        = notional * pct - notional * FEE_RATE * 2
-                pnl        = max(pnl, -capital)
-                capital   += pnl
-                peak_cap   = max(peak_cap, capital)
+            if hit_tp or hit_sl or hit_time:
+                if hit_tp:
+                    exit_price  = tp_price
+                    exit_reason = "TP"
+                elif hit_sl:
+                    exit_price  = sl_price
+                    exit_reason = "SL"
+                else:
+                    exit_price  = row["close"]
+                    exit_reason = "TIME"
+
+                pct = ((exit_price - entry_price) / entry_price if direction == "long"
+                       else (entry_price - exit_price) / entry_price)
+                pnl = notional * pct - notional * FEE_RATE * 2
+                pnl = max(pnl, -capital)
+                capital  += pnl
+                peak_cap  = max(peak_cap, capital)
                 trades.append({
                     "exit_time":       ts,
                     "direction":       direction,
                     "entry_price":     round(entry_price, 6),
                     "exit_price":      round(exit_price, 6),
                     "notional":        round(notional, 4),
-                    "exit_reason":     "TP" if hit_tp else "SL",
+                    "exit_reason":     exit_reason,
                     "peak_loss_ratio": round(peak_loss_ratio, 6),
                     "pnl_usdt":        round(pnl, 4),
                     "capital":         round(capital, 4),
@@ -323,12 +408,58 @@ def run_backtest(symbol: str, coin: str):
                 peak_loss_ratio    = 0.0
                 trail_active       = False
                 trail_sl           = 0.0
+                partial_done       = False
+                bars_in_trade      = 0
                 in_trade           = False
-                if not hit_tp:
+                if exit_reason == "SL":
                     cooldown_remaining = COOLDOWN_BARS
 
-        # ── Entry ─────────────────────────────────────────────────────────────
-        if not in_trade:
+        # ── Pullback-pending: check for retrace entry ─────────────────────────
+        if not in_trade and pb_pending:
+            pb_bars_left -= 1
+            entered = False
+            if pb_direction == "long":
+                target = pb_level - pb_atr * PULLBACK_ATR
+                if row["low"] <= pb_level and row["close"] >= target:
+                    entry_price = max(row["close"], target)
+                    entered = True
+            else:
+                target = pb_level + pb_atr * PULLBACK_ATR
+                if row["high"] >= pb_level and row["close"] <= target:
+                    entry_price = min(row["close"], target)
+                    entered = True
+
+            if entered:
+                direction    = pb_direction
+                pb_pending   = False
+                atr          = row["atr"]
+                sl_dist      = atr * SL_MULT
+                sl_dist_pct  = sl_dist / entry_price
+                if USE_VOL_TARGET:
+                    rv = row["realised_vol"]
+                    notional_full = (capital * VOL_TARGET / rv
+                                     if not pd.isna(rv) and rv > 1e-6
+                                     else capital * BASE_RISK / sl_dist_pct)
+                else:
+                    notional_full = capital * BASE_RISK / sl_dist_pct
+                notional_full = min(notional_full, capital * LEVERAGE)
+                notional      = notional_full
+                sl_price      = (entry_price - sl_dist if direction == "long"
+                                 else entry_price + sl_dist)
+                tp_price      = (entry_price + sl_dist * TP_RR if direction == "long"
+                                 else entry_price - sl_dist * TP_RR)
+                partial_tp_price = (entry_price + sl_dist * PARTIAL_TP_R if direction == "long"
+                                    else entry_price - sl_dist * PARTIAL_TP_R)
+                trail_sl      = sl_price
+                trail_active  = False
+                partial_done  = False
+                bars_in_trade = 0
+                in_trade      = True
+            elif pb_bars_left <= 0:
+                pb_pending = False   # window expired
+
+        # ── Signal detection + entry (or queue pullback) ──────────────────────
+        if not in_trade and not pb_pending:
             if cooldown_remaining > 0:
                 cooldown_remaining -= 1
                 continue
@@ -336,42 +467,51 @@ def run_backtest(symbol: str, coin: str):
             atr = row["atr"]
             if pd.isna(atr) or atr <= 0:
                 continue
-
             if ADX_MIN > 0 and (pd.isna(row["adx"]) or row["adx"] < ADX_MIN):
                 continue
-
+            if ADX_SLOPE_BARS > 0 and not row["adx_slope_ok"]:
+                continue
             if not row["vol_ok"]:
                 continue
 
             if   row["entry_long"]  and     row["trend_up"]:
-                direction = "long"
+                sig = "long"
             elif row["entry_short"] and not row["trend_up"]:
-                direction = "short"
+                sig = "short"
             else:
                 continue
 
-            entry_price = row["close"]
-            sl_dist     = atr * SL_MULT
-            sl_dist_pct = sl_dist / entry_price
-
-            # ── Position sizing ───────────────────────────────────────────────
-            if USE_VOL_TARGET:
-                rv = row["realised_vol"]
-                if not pd.isna(rv) and rv > 1e-6:
-                    # vol-targeting: scale so portfolio ann-vol ≈ VOL_TARGET
-                    notional = capital * VOL_TARGET / rv
-                else:
-                    notional = capital * BASE_RISK / sl_dist_pct
+            if USE_PULLBACK:
+                pb_pending   = True
+                pb_direction = sig
+                pb_level     = row["don_upper"] if sig == "long" else row["don_lower"]
+                pb_atr       = atr
+                pb_bars_left = PULLBACK_WINDOW
             else:
-                notional = capital * BASE_RISK / sl_dist_pct
-
-            notional = min(notional, capital * LEVERAGE)
-
-            sl_price     = entry_price - sl_dist if direction == "long" else entry_price + sl_dist
-            tp_price     = entry_price + sl_dist * TP_RR if direction == "long" else entry_price - sl_dist * TP_RR
-            trail_sl     = sl_price
-            trail_active = False
-            in_trade     = True
+                direction   = sig
+                entry_price = row["close"]
+                sl_dist     = atr * SL_MULT
+                sl_dist_pct = sl_dist / entry_price
+                if USE_VOL_TARGET:
+                    rv = row["realised_vol"]
+                    notional_full = (capital * VOL_TARGET / rv
+                                     if not pd.isna(rv) and rv > 1e-6
+                                     else capital * BASE_RISK / sl_dist_pct)
+                else:
+                    notional_full = capital * BASE_RISK / sl_dist_pct
+                notional_full = min(notional_full, capital * LEVERAGE)
+                notional      = notional_full
+                sl_price      = (entry_price - sl_dist if direction == "long"
+                                 else entry_price + sl_dist)
+                tp_price      = (entry_price + sl_dist * TP_RR if direction == "long"
+                                 else entry_price - sl_dist * TP_RR)
+                partial_tp_price = (entry_price + sl_dist * PARTIAL_TP_R if direction == "long"
+                                    else entry_price - sl_dist * PARTIAL_TP_R)
+                trail_sl      = sl_price
+                trail_active  = False
+                partial_done  = False
+                bars_in_trade = 0
+                in_trade      = True
 
     if not trades:
         print("  No trades.")
@@ -431,10 +571,13 @@ def current_params() -> dict:
         "USE_VOL_TARGET": USE_VOL_TARGET, "VOL_TARGET": VOL_TARGET, "VOL_LOOKBACK": VOL_LOOKBACK,
         "DONCHIAN_PERIOD": DONCHIAN_PERIOD, "ATR_PERIOD": ATR_PERIOD,
         "SL_MULT": SL_MULT, "TP_RR": TP_RR, "TREND_EMA_PERIOD": TREND_EMA_PERIOD,
-        "ADX_PERIOD": ADX_PERIOD, "ADX_MIN": ADX_MIN,
+        "ADX_PERIOD": ADX_PERIOD, "ADX_MIN": ADX_MIN, "ADX_SLOPE_BARS": ADX_SLOPE_BARS,
         "VOL_MA_PERIOD": VOL_MA_PERIOD, "VOL_MULT": VOL_MULT,
         "USE_TRAIL": USE_TRAIL, "TRAIL_TRIGGER_R": TRAIL_TRIGGER_R, "TRAIL_MULT": TRAIL_MULT,
         "COOLDOWN_BARS": COOLDOWN_BARS,
+        "USE_PARTIAL_TP": USE_PARTIAL_TP, "PARTIAL_TP_R": PARTIAL_TP_R, "PARTIAL_TP_FRAC": PARTIAL_TP_FRAC,
+        "USE_PULLBACK": USE_PULLBACK, "PULLBACK_ATR": PULLBACK_ATR, "PULLBACK_WINDOW": PULLBACK_WINDOW,
+        "MAX_HOLD_BARS": MAX_HOLD_BARS,
         "OPTIMIZE_TARGET": OPTIMIZE_TARGET,
     }
 
@@ -504,7 +647,20 @@ def auto_tune():
 
     keys   = list(TUNE_SPACE.keys())
     values = list(TUNE_SPACE.values())
-    combos = [dict(zip(keys, c)) for c in itertools.product(*values)]
+    combos_raw = [dict(zip(keys, c)) for c in itertools.product(*values)]
+
+    # Deduplicate: PARTIAL_TP_R is irrelevant when USE_PARTIAL_TP=False
+    seen   = set()
+    combos = []
+    for p in combos_raw:
+        key_parts = {k: v for k, v in p.items()}
+        if not p.get("USE_PARTIAL_TP"):
+            key_parts["PARTIAL_TP_R"] = None
+        fingerprint = tuple(sorted(key_parts.items()))
+        if fingerprint not in seen:
+            seen.add(fingerprint)
+            combos.append(p)
+
     total  = len(combos)
     n_workers = min(16, max(1, mp.cpu_count() - 1))
 
@@ -520,7 +676,7 @@ def auto_tune():
     pbar = tqdm(total=total, desc="CALMAR-TUNE", unit="combo", ncols=95)
     with ctx.Pool(processes=n_workers, initializer=_worker_init) as pool:
         for p, avg_score, coin_scores, coin_holds, snapped_params in \
-                pool.imap_unordered(_tune_worker, combos, chunksize=1):
+                pool.imap_unordered(_tune_worker, combos, chunksize=8):
             done += 1
             pbar.update(1)
 
