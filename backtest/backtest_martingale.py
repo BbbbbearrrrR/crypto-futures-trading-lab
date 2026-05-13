@@ -26,9 +26,10 @@ from pathlib import Path
 import sys
 from tqdm import tqdm
 
-DATA_DIR    = Path("data")
-RESULTS_DIR = Path("results/martingale")
-RESULTS_DIR.mkdir(exist_ok=True)
+_ROOT       = Path(__file__).resolve().parent.parent
+DATA_DIR    = _ROOT / "data"
+RESULTS_DIR = _ROOT / "results/martingale"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Raw data cache (populated by preload_data() before multiprocessing Pool) ──
 _RAW_DATA: dict = {}  # {coin: (df_1h, df_1d)}

@@ -33,8 +33,9 @@ from pathlib import Path
 import sys
 from tqdm import tqdm
 
-DATA_DIR    = Path("data")
-RESULTS_DIR = Path("results/regime")
+_ROOT       = Path(__file__).resolve().parent.parent
+DATA_DIR    = _ROOT / "data"
+RESULTS_DIR = _ROOT / "results/calmar"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _RAW_DATA: dict = {}
@@ -87,15 +88,6 @@ MAX_HOLD_BARS    = 0       # 0 = disabled; e.g. 72 = close after 72 bars
 # ── ADX slope filter ─────────────────────────────────────────────────────────
 ADX_SLOPE_BARS   = 3       # require ADX rising over this many bars (0=disabled)
 
-# ── Dual-regime parameters ────────────────────────────────────────────────────
-REGIME_ADX_THRESHOLD = 20.0   # ADX below this → MR mode; above → trend mode
-
-# Mean-reversion mode (Bollinger Band fade)
-BOLL_PERIOD  = 20          # BB lookback period
-BOLL_STD     = 2.0         # BB width in std devs
-MR_SL_MULT   = 1.0         # SL for MR trades (tighter than trend)
-MR_TP_RR     = 1.5         # TP ratio for MR trades
-
 # ── Max simultaneous open positions ──────────────────────────────────────────
 MAX_OPEN_POS     = 1       # per-coin backtest always has 1 coin, kept for portfolio use
 
@@ -105,29 +97,25 @@ OPTIMIZE_TARGET  = "calmar"    # "calmar" | "sharpe" | "return"
 MIN_TRADE_COUNT  = 30          # disqualify combos with fewer trades (anti-overfit)
 
 TUNE_SPACE = {
-    "LEVERAGE":               [2, 5],
-    "USE_VOL_TARGET":         [True, False],
-    "VOL_TARGET":             [0.30],
-    "DONCHIAN_PERIOD":        [10, 20],
-    "ATR_PERIOD":             [14],
-    "SL_MULT":                [1.0, 1.5],
-    "TP_RR":                  [3.0, 5.0],
-    "TREND_EMA_PERIOD":       [200],
-    "ADX_MIN":                [0.0, 20.0],
-    "ADX_SLOPE_BARS":         [0],
-    "VOL_MULT":               [1.0, 1.5],
-    "COOLDOWN_BARS":          [0, 3],
-    "USE_PARTIAL_TP":         [True, False],
-    "PARTIAL_TP_R":           [1.5],
-    "USE_PULLBACK":           [True, False],
-    "MAX_HOLD_BARS":          [0, 72],
-    # ── Regime params ────────────────────────────────────────────────────────
-    "REGIME_ADX_THRESHOLD":   [15.0, 20.0, 25.0],
-    "BOLL_PERIOD":            [20],
-    "BOLL_STD":               [1.5, 2.0, 2.5],
-    "MR_SL_MULT":             [0.5, 1.0],
-    "MR_TP_RR":               [1.5, 2.0],
+    # Narrowed based on best_params.json: keep only values that appeared as optimal
+    "LEVERAGE":          [2, 5],           # 3 never appeared in best
+    "USE_VOL_TARGET":    [True, False],
+    "VOL_TARGET":        [0.30],           # all best were 0.30
+    "DONCHIAN_PERIOD":   [10, 20, 40],
+    "ATR_PERIOD":        [7, 14],
+    "SL_MULT":           [1.0, 1.5, 2.0],
+    "TP_RR":             [3.0, 5.0],       # 2.0 never appeared in best
+    "TREND_EMA_PERIOD":  [50, 200],        # 100 never appeared in best
+    "ADX_MIN":           [0.0, 20.0],      # 25.0 never appeared in best
+    "ADX_SLOPE_BARS":    [0, 3],
+    "VOL_MULT":          [1.0, 1.5],
+    "COOLDOWN_BARS":     [0, 3],
+    "USE_PARTIAL_TP":    [True, False],
+    "PARTIAL_TP_R":      [1.0, 1.5],
+    "USE_PULLBACK":      [True, False],
+    "MAX_HOLD_BARS":     [0, 72],
 }
+# Total: 2×2×1×3×2×3×2×2×2×2×2×2×2×2×2×3 = 110,592 combinations (vs 1.68M before)
 
 COINS = [
     ("BTC/USDT:USDT", "btc"),
@@ -182,7 +170,7 @@ def prepare(df_1h: pd.DataFrame, df_1d: pd.DataFrame) -> pd.DataFrame:
     else:
         df["adx_slope_ok"] = True
 
-    # Breakout signals (Trend mode)
+    # Breakout signals
     df["entry_long"]  = df["close"] > df["don_upper"]
     df["entry_short"] = df["close"] < df["don_lower"]
 
@@ -192,15 +180,6 @@ def prepare(df_1h: pd.DataFrame, df_1d: pd.DataFrame) -> pd.DataFrame:
     d1["trend_up"] = d1["close"] > d1_ema
     trend  = d1["trend_up"].reindex(df.index, method="ffill").ffill()
     df["trend_up"] = np.where(trend.isna(), False, trend).astype(bool)
-
-    # Bollinger Bands for MR mode
-    bb_mid = df["close"].rolling(BOLL_PERIOD).mean()
-    bb_std = df["close"].rolling(BOLL_PERIOD).std()
-    df["bb_upper"] = bb_mid + BOLL_STD * bb_std
-    df["bb_lower"] = bb_mid - BOLL_STD * bb_std
-    # MR entry: price pierced band previous bar, closes back inside this bar
-    df["mr_entry_long"]  = (df["close"].shift(1) < df["bb_lower"].shift(1)) & (df["close"] > df["bb_lower"])
-    df["mr_entry_short"] = (df["close"].shift(1) > df["bb_upper"].shift(1)) & (df["close"] < df["bb_upper"])
 
     return df
 
@@ -326,7 +305,6 @@ def run_backtest(symbol: str, coin: str):
     pb_level      = 0.0           # don_upper / don_lower at signal bar
     pb_atr        = 0.0
     pb_bars_left  = 0
-    pb_in_trend_regime = True     # regime at pullback queue time
 
     warmup = max(DONCHIAN_PERIOD, ATR_PERIOD, ADX_PERIOD, VOL_MA_PERIOD,
                  VOL_LOOKBACK, ADX_SLOPE_BARS) + 2
@@ -456,9 +434,7 @@ def run_backtest(symbol: str, coin: str):
                 direction    = pb_direction
                 pb_pending   = False
                 atr          = row["atr"]
-                _sl_mult_use = SL_MULT if pb_in_trend_regime else MR_SL_MULT
-                _tp_rr_use   = TP_RR   if pb_in_trend_regime else MR_TP_RR
-                sl_dist      = atr * _sl_mult_use
+                sl_dist      = atr * SL_MULT
                 sl_dist_pct  = sl_dist / entry_price
                 if USE_VOL_TARGET:
                     rv = row["realised_vol"]
@@ -471,8 +447,8 @@ def run_backtest(symbol: str, coin: str):
                 notional      = notional_full
                 sl_price      = (entry_price - sl_dist if direction == "long"
                                  else entry_price + sl_dist)
-                tp_price      = (entry_price + sl_dist * _tp_rr_use if direction == "long"
-                                 else entry_price - sl_dist * _tp_rr_use)
+                tp_price      = (entry_price + sl_dist * TP_RR if direction == "long"
+                                 else entry_price - sl_dist * TP_RR)
                 partial_tp_price = (entry_price + sl_dist * PARTIAL_TP_R if direction == "long"
                                     else entry_price - sl_dist * PARTIAL_TP_R)
                 trail_sl      = sl_price
@@ -499,39 +475,23 @@ def run_backtest(symbol: str, coin: str):
             if not row["vol_ok"]:
                 continue
 
-            adx_cur = row["adx"] if not pd.isna(row["adx"]) else 0.0
-            in_trend_regime = adx_cur >= REGIME_ADX_THRESHOLD
-
-            if in_trend_regime:
-                # ── Trend mode: Donchian breakout + trend filter ──────────────
-                if   row["entry_long"]  and     row["trend_up"]:
-                    sig = "long"
-                elif row["entry_short"] and not row["trend_up"]:
-                    sig = "short"
-                else:
-                    continue
+            if   row["entry_long"]  and     row["trend_up"]:
+                sig = "long"
+            elif row["entry_short"] and not row["trend_up"]:
+                sig = "short"
             else:
-                # ── MR mode: Bollinger Band fade ──────────────────────────────
-                if ADX_SLOPE_BARS > 0 and row["adx_slope_ok"]:
-                    continue   # ADX rising = trending, skip MR
-                if   bool(row.get("mr_entry_long",  False)): sig = "long"
-                elif bool(row.get("mr_entry_short", False)): sig = "short"
-                else: continue
+                continue
 
             if USE_PULLBACK:
-                pb_pending         = True
-                pb_direction       = sig
-                pb_level           = row["don_upper"] if sig == "long" else row["don_lower"]
-                pb_atr             = atr
-                pb_bars_left       = PULLBACK_WINDOW
-                pb_in_trend_regime = in_trend_regime
+                pb_pending   = True
+                pb_direction = sig
+                pb_level     = row["don_upper"] if sig == "long" else row["don_lower"]
+                pb_atr       = atr
+                pb_bars_left = PULLBACK_WINDOW
             else:
                 direction   = sig
                 entry_price = row["close"]
-                # Use tighter SL/TP in MR mode
-                _sl_mult_use = SL_MULT  if in_trend_regime else MR_SL_MULT
-                _tp_rr_use   = TP_RR   if in_trend_regime else MR_TP_RR
-                sl_dist     = atr * _sl_mult_use
+                sl_dist     = atr * SL_MULT
                 sl_dist_pct = sl_dist / entry_price
                 if USE_VOL_TARGET:
                     rv = row["realised_vol"]
@@ -544,8 +504,8 @@ def run_backtest(symbol: str, coin: str):
                 notional      = notional_full
                 sl_price      = (entry_price - sl_dist if direction == "long"
                                  else entry_price + sl_dist)
-                tp_price      = (entry_price + sl_dist * _tp_rr_use if direction == "long"
-                                 else entry_price - sl_dist * _tp_rr_use)
+                tp_price      = (entry_price + sl_dist * TP_RR if direction == "long"
+                                 else entry_price - sl_dist * TP_RR)
                 partial_tp_price = (entry_price + sl_dist * PARTIAL_TP_R if direction == "long"
                                     else entry_price - sl_dist * PARTIAL_TP_R)
                 trail_sl      = sl_price
@@ -559,7 +519,7 @@ def run_backtest(symbol: str, coin: str):
         return None
 
     t = pd.DataFrame(trades)
-    t.to_csv(RESULTS_DIR / f"{coin}_regime.csv", index=False)
+    t.to_csv(RESULTS_DIR / f"{coin}_calmar.csv", index=False)
 
     m     = compute_metrics(t, INITIAL_CAPITAL)
     pf_s  = f"{m['pf']:.2f}"     if m["pf"]     < 999 else "inf"
@@ -620,10 +580,6 @@ def current_params() -> dict:
         "USE_PULLBACK": USE_PULLBACK, "PULLBACK_ATR": PULLBACK_ATR, "PULLBACK_WINDOW": PULLBACK_WINDOW,
         "MAX_HOLD_BARS": MAX_HOLD_BARS,
         "OPTIMIZE_TARGET": OPTIMIZE_TARGET,
-        # regime
-        "REGIME_ADX_THRESHOLD": REGIME_ADX_THRESHOLD,
-        "BOLL_PERIOD": BOLL_PERIOD, "BOLL_STD": BOLL_STD,
-        "MR_SL_MULT": MR_SL_MULT, "MR_TP_RR": MR_TP_RR,
     }
 
 

@@ -26,7 +26,21 @@
   "eth": {
     "capital": 10000.0,
     "peak_cap": 10000.0,
-    "martin": null,
+    "martin": {
+      "direction": "short",
+      "level": 0,
+      "profit_level": 0,
+      "notional": 500.0,
+      "entries": [
+        [
+          2296.52,
+          500.0
+        ]
+      ],
+      "grid_step": 10.0,
+      "capital": 10000.0,
+      "tp_tier": 0
+    },
     "trades": []
   },
   "sol": {

@@ -23,8 +23,9 @@ from pathlib import Path
 import sys
 from tqdm import tqdm
 
-DATA_DIR    = Path("data")
-RESULTS_DIR = Path("results/breakout")
+_ROOT       = Path(__file__).resolve().parent.parent
+DATA_DIR    = _ROOT / "data"
+RESULTS_DIR = _ROOT / "results/breakout"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _RAW_DATA: dict = {}
