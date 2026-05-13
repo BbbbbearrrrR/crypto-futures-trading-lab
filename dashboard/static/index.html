@@ -116,6 +116,7 @@ const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00
 
 let activeTab = "breakout";
 let summaryCache = {};
+let lastCycleKey = "";  // track last seen cycle timestamps to detect new cycles
 
 /* ── helpers ── */
 function retClass(v) {
@@ -169,7 +170,11 @@ function renderSummary(data) {
         </span></td>
         <td>${fmtCap(c.capital ?? 10000)}</td>
         <td class="${retClass(ret)}">${retStr(ret)}</td>
-        <td>${upnlHtml}</td>
+        <td data-upnl="${strat}-${coin}"
+            data-entry="${c.entry_price || 0}"
+            data-notional="${c.notional || 0}"
+            data-direction="${c.direction || ''}"
+            data-capital="${c.capital || 10000}">${upnlHtml}</td>
         <td>${c.total_trades ?? 0}</td>
         <td>${c.win_rate != null ? c.win_rate + "%" : "—"}</td>
         <td style="color:var(--muted);font-size:12px">${c.entry_price ? c.entry_price.toLocaleString() : "—"}</td>
@@ -256,15 +261,71 @@ async function refresh() {
     renderSummary(summaryCache);
     document.getElementById("last-updated").textContent =
       new Date().toLocaleTimeString("zh");
+    await refreshPrices();
   } catch(e) {
     console.error("fetch error", e);
   }
 }
 
+/* ── Real-time price + cycle detection (every 10s) ── */
+async function refreshPrices() {
+  try {
+    const res = await fetch("/api/prices");
+    const prices = await res.json();
+    document.querySelectorAll("[data-upnl]").forEach(td => {
+      const entry     = parseFloat(td.dataset.entry);
+      const notional  = parseFloat(td.dataset.notional);
+      const direction = td.dataset.direction;
+      const capital   = parseFloat(td.dataset.capital);
+      const key       = td.dataset.upnl.split("-")[1];
+      const cur       = prices[key];
+      if (!cur || !entry || !direction) { return; }
+      const priceChg = (cur - entry) / entry;
+      const upnl     = notional * priceChg * (direction === "long" ? 1 : -1);
+      const upct     = upnl / capital * 100;
+      td.innerHTML    = `<span class="${upnl >= 0 ? 'pos' : 'neg'}">${upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}</span><br><span style="font-size:11px;color:var(--muted)">${upct >= 0 ? '+' : ''}${upct.toFixed(2)}%</span>`;
+    });
+  } catch(e) {
+    console.error("price fetch error", e);
+  }
+
+  // Detect if any strategy has a new cycle — if so, do full refresh
+  try {
+    const res2 = await fetch("/api/summary");
+    const fresh = await res2.json();
+    const cycleKey = STRATEGIES.map(s => fresh[s]?.last_cycle).join("|");
+    if (cycleKey !== lastCycleKey) {
+      lastCycleKey = cycleKey;
+      summaryCache = fresh;
+      renderSummary(fresh);
+      document.getElementById("last-updated").textContent =
+        new Date().toLocaleTimeString("zh") + " ✓new cycle";
+      // re-run price overlay immediately after re-render
+      await refreshPricesOnly(prices);
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function refreshPricesOnly(prices) {
+  document.querySelectorAll("[data-upnl]").forEach(td => {
+    const entry     = parseFloat(td.dataset.entry);
+    const notional  = parseFloat(td.dataset.notional);
+    const direction = td.dataset.direction;
+    const capital   = parseFloat(td.dataset.capital);
+    const key       = td.dataset.upnl.split("-")[1];
+    const cur       = prices[key];
+    if (!cur || !entry || !direction) { return; }
+    const priceChg = (cur - entry) / entry;
+    const upnl     = notional * priceChg * (direction === "long" ? 1 : -1);
+    const upct     = upnl / capital * 100;
+    td.innerHTML    = `<span class="${upnl >= 0 ? 'pos' : 'neg'}">${upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}</span><br><span style="font-size:11px;color:var(--muted)">${upct >= 0 ? '+' : ''}${upct.toFixed(2)}%</span>`;
+  });
+}
+
 renderTabs();
 loadTrades(activeTab);
 refresh();
-setInterval(refresh, 30000);
+setInterval(refreshPrices, 10000);
 </script>
 </body>
 </html>

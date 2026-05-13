@@ -25,3 +25,4 @@ paper/paper_state_*.json
 paper/paper_trades_*.csv
 paper/*.log
 logs/
+.env

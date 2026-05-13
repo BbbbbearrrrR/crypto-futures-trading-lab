@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone
 
+import ccxt
 from flask import Flask, jsonify, send_from_directory
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -22,6 +23,16 @@ _LOGS  = _ROOT / "logs"
 
 STRATEGIES = ["breakout", "calmar", "martingale", "regime"]
 COINS      = ["btc", "eth", "sol", "hype"]
+
+COIN_SYMBOLS = {
+    "btc":  "BTC/USDT:USDT",
+    "eth":  "ETH/USDT:USDT",
+    "sol":  "SOL/USDT:USDT",
+    "hype": "HYPE/USDT:USDT",
+}
+
+_exchange = ccxt.binance({"options": {"defaultType": "future"}})
+_exchange.set_sandbox_mode(True)
 
 
 def _load_state(strategy: str) -> dict:
@@ -96,6 +107,18 @@ def _parse_log_tail(strategy: str, n_lines: int = 80) -> dict:
     }
 
 
+@app.route("/api/prices")
+def api_prices():
+    prices = {}
+    for coin, symbol in COIN_SYMBOLS.items():
+        try:
+            ticker = _exchange.fetch_ticker(symbol)
+            prices[coin] = ticker["last"]
+        except Exception:
+            prices[coin] = None
+    return jsonify(prices)
+
+
 @app.route("/api/summary")
 def api_summary():
     result = {}
@@ -115,6 +138,7 @@ def api_summary():
             entry = cs.get("entry_price", 0.0)
             sl = cs.get("sl_price", 0.0)
             tp = cs.get("tp_price", 0.0)
+            notional = cs.get("notional", 0.0)
             trades_list = cs.get("trades", [])
 
             total_capital += cap
@@ -135,6 +159,7 @@ def api_summary():
                 "entry_price": entry,
                 "sl_price": sl,
                 "tp_price": tp,
+                "notional": round(notional, 4),
                 "total_trades": total_trades,
                 "win_rate": round(wr, 1) if wr is not None else None,
             }
