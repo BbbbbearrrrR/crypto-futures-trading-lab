@@ -154,6 +154,24 @@
   .sidebar table.trades { font-size: 11px; }
   .sidebar table.trades th, .sidebar table.trades td { padding: 4px 7px; }
 
+  /* ── Trade cards ── */
+  .trade-list { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+  .trade-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .trade-card-top {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .trade-card-coin { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .trade-card-pnl  { font-size: 14px; font-weight: 700; }
+  .trade-card-meta {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    font-size: 11px; color: var(--muted);
+  }
+  .trade-card-meta span b { color: var(--text); font-weight: 600; }
+  .trade-card-time { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
   /* ── BTC 1H Chart ── */
   .chart-section {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
@@ -458,15 +476,35 @@ async function loadTrades(strategy) {
     body.innerHTML = `<p class="empty-msg">No trades yet</p>`;
     return;
   }
-  const headers = Object.keys(rows[0]);
-  body.innerHTML = `
-    <table class="trades">
-      <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
-      <tbody>${rows.map(r => `<tr>${headers.map(h => {
-        if (h === "pnl_usdt") return `<td>${fmtPnl(r[h])}</td>`;
-        return `<td>${r[h] ?? "—"}</td>`;
-      }).join("")}</tr>`).join("")}</tbody>
-    </table>`;
+  const cards = rows.map(r => {
+    const pnl = parseFloat(r.pnl_usdt ?? r.pnl ?? 0);
+    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const pnlStr = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+    const coin   = (r.coin ?? r.symbol ?? '').toUpperCase();
+    const dir    = r.direction ?? r.side ?? '';
+    const dirCls = dir === 'long' ? 'badge-long' : dir === 'short' ? 'badge-short' : 'badge-flat';
+    const entry  = parseFloat(r.entry_price ?? 0).toLocaleString('en', {maximumFractionDigits: 2});
+    const exit_p = parseFloat(r.exit_price ?? 0).toLocaleString('en', {maximumFractionDigits: 2});
+    const size   = parseFloat(r.notional ?? 0).toFixed(2);
+    const ts     = r.timestamp ?? r.time ?? '';
+    return `
+    <div class="trade-card">
+      <div class="trade-card-top">
+        <span class="trade-card-coin">
+          ${coin ? `<span style="color:${COIN_COLORS[coin.toLowerCase()]||'var(--text)'};font-size:11px">●</span>${coin}` : '—'}
+          <span class="badge ${dirCls}">${dir || 'flat'}</span>
+        </span>
+        <span class="trade-card-pnl ${pnlCls}">${pnlStr}</span>
+      </div>
+      <div class="trade-card-meta">
+        <span><b>Entry</b> ${entry}</span>
+        <span><b>Exit</b> ${exit_p}</span>
+        <span><b>Size</b> $${size}</span>
+      </div>
+      <div class="trade-card-time">${ts}</div>
+    </div>`;
+  }).join('');
+  body.innerHTML = `<div class="trade-list">${cards}</div>`;
 }
 
 function renderTabs() {
