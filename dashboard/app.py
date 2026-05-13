@@ -21,7 +21,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _PAPER = _ROOT / "paper"
 _LOGS  = _ROOT / "logs"
 
-STRATEGIES = ["breakout", "calmar", "regime", "martingale"]
+STRATEGIES = ["breakout", "calmar", "regime"]
 COINS      = ["btc", "eth", "sol", "hype", "sui"]
 
 COIN_SYMBOLS = {
