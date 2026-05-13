@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -184,44 +184,44 @@
     <img src="/Logo.png" alt="logo" style="height:36px;width:36px;object-fit:contain;filter:invert(0);" />
     <h1>Paper Trading Dashboard</h1>
   </div>
-  <div id="refresh-info">价格实时刷新 10s · 上次更新：<span id="last-updated">—</span></div>
+  <div id="refresh-info">Prices refresh every 10s &middot; Last updated: <span id="last-updated">—</span></div>
 </header>
 
 <main>
   <!-- ── Overview bar ── -->
   <div class="overview-bar" id="overview-bar">
     <div class="ov-item">
-      <div class="ov-label">总资金</div>
+      <div class="ov-label">Total Capital</div>
       <div class="ov-value" id="ov-capital">—</div>
       <div class="ov-sub" id="ov-capital-sub"></div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
-      <div class="ov-label">已实现盈亏</div>
+      <div class="ov-label">Realised PnL</div>
       <div class="ov-value" id="ov-realized">—</div>
       <div class="ov-sub" id="ov-realized-sub"></div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
-      <div class="ov-label">未实现盈亏</div>
+      <div class="ov-label">Unrealised PnL</div>
       <div class="ov-value" id="ov-unrealized">—</div>
       <div class="ov-sub" id="ov-unrealized-sub"></div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
-      <div class="ov-label">综合收益率</div>
+      <div class="ov-label">Combined Return</div>
       <div class="ov-value" id="ov-return">—</div>
       <div class="ov-sub" id="ov-return-sub"></div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
-      <div class="ov-label">持仓数</div>
+      <div class="ov-label">Open Positions</div>
       <div class="ov-value" id="ov-pos">—</div>
-      <div class="ov-sub">/ 12 仓位</div>
+      <div class="ov-sub">/ 12 slots</div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
-      <div class="ov-label">总成交笔数</div>
+      <div class="ov-label">Total Trades</div>
       <div class="ov-value" id="ov-trades">—</div>
       <div class="ov-sub" id="ov-winrate"></div>
     </div>
@@ -229,7 +229,7 @@
 
   <div class="main-col">
     <div class="strategy-grid" id="strategy-grid">
-      <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">加载中…</div>
+      <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">Loading…</div>
     </div>
 
     <div class="chart-section">
@@ -252,11 +252,11 @@
 </main>
 
 <!-- ── Trades drawer ── -->
-<button class="drawer-btn" id="drawer-btn" onclick="toggleDrawer()">成交记录</button>
+<button class="drawer-btn" id="drawer-btn" onclick="toggleDrawer()">Trades</button>
 <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
 <aside class="sidebar" id="trades-drawer">
   <div class="sidebar-header">
-    <h2>成交记录</h2>
+    <h2>Trade History</h2>
     <button class="sidebar-close" onclick="closeDrawer()">✕</button>
   </div>
   <div class="sidebar-tabs">
@@ -264,7 +264,7 @@
   </div>
   <div class="sidebar-body">
     <div class="trades-table-wrap" id="trades-body">
-      <p class="empty-msg">加载中…</p>
+      <p class="empty-msg">Loading…</p>
     </div>
   </div>
 </aside>
@@ -320,7 +320,7 @@ function renderOverview(ov) {
   const capEl = document.getElementById("ov-capital");
   capEl.textContent = "$" + ov.totalCurrent.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById("ov-capital-sub").textContent =
-    "初始 $" + TOTAL_INITIAL.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+    "Initial $" + TOTAL_INITIAL.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
 
   const realEl = document.getElementById("ov-realized");
   realEl.textContent = (ov.realized >= 0 ? "+" : "") + "$" + ov.realized.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -343,7 +343,7 @@ function renderOverview(ov) {
   document.getElementById("ov-pos").textContent = ov.openPos;
   document.getElementById("ov-trades").textContent = ov.totalTrades;
   const wrEl = document.getElementById("ov-winrate");
-  wrEl.textContent = ov.winRate != null ? `胜率 ${ov.winRate.toFixed(1)}%` : "";
+  wrEl.textContent = ov.winRate != null ? `Win rate ${ov.winRate.toFixed(1)}%` : "";
 }
 
 /* ── helpers ── */
@@ -432,14 +432,14 @@ function renderSummary(data) {
       <div class="card-body">
         <table class="coin-table">
           <thead><tr>
-            <th>币种</th><th>资金</th><th>收益</th><th>未实现</th><th>笔数</th><th>胜率</th><th>入场价</th><th>现价</th>
+            <th>Coin</th><th>Capital</th><th>Return</th><th>Unrealised</th><th>Trades</th><th>Win%</th><th>Entry</th><th>Price</th>
           </tr></thead>
           <tbody>${coinRows}</tbody>
         </table>
         <div class="cycle-info">
-          <span>上次周期 <b>${s.last_cycle ?? "—"}</b></span>
-          ${nextMin != null ? `<span>下次 <b>${nextMin.toFixed(1)} min</b> (${nextAt})</span>` : ""}
-          <span>持仓 <b>${s.open_positions}</b></span>
+          <span>Last cycle <b>${s.last_cycle ?? "—"}</b></span>
+          ${nextMin != null ? `<span>Next in <b>${nextMin.toFixed(1)} min</b> (${nextAt})</span>` : ""}
+          <span>Positions <b>${s.open_positions}</b></span>
         </div>
         ${signalHtml}
       </div>`;
@@ -451,11 +451,11 @@ function renderSummary(data) {
 /* ── Trades render ── */
 async function loadTrades(strategy) {
   const body = document.getElementById("trades-body");
-  body.innerHTML = `<p class="empty-msg">加载中…</p>`;
+  body.innerHTML = `<p class="empty-msg">Loading…</p>`;
   const res = await fetch(`/api/trades/${strategy}`);
   const rows = await res.json();
   if (!rows.length) {
-    body.innerHTML = `<p class="empty-msg">暂无成交记录</p>`;
+    body.innerHTML = `<p class="empty-msg">No trades yet</p>`;
     return;
   }
   const headers = Object.keys(rows[0]);
@@ -490,7 +490,7 @@ async function refresh() {
     summaryCache = await res.json();
     renderSummary(summaryCache);
     document.getElementById("last-updated").textContent =
-      new Date().toLocaleTimeString("zh");
+      new Date().toLocaleTimeString("en");
     renderOverview(computeOverview(summaryCache, pricesCache));
     await refreshPrices();
   } catch(e) {
@@ -537,7 +537,7 @@ async function refreshPrices() {
       renderSummary(fresh);
       renderOverview(computeOverview(fresh, prices));
       document.getElementById("last-updated").textContent =
-        new Date().toLocaleTimeString("zh") + " ✓new cycle";
+        new Date().toLocaleTimeString("en") + " ✓new cycle";
       // re-run price overlay immediately after re-render
       await refreshPricesOnly(prices);
     }
