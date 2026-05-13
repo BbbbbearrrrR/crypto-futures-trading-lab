@@ -1,8 +1,7 @@
 """
 Fetch perpetual futures OHLCV history from Binance for BTC, ETH, SOL.
 Timeframes:
-  1d / 1h  — past 5 years  (trend filter data)
-  5m       — past 2 years  (scalping backtest data)
+    1d / 1h  — past 5 years
 Output: data/{coin}_futures_{tf}.csv
 """
 
@@ -30,7 +29,6 @@ SYMBOLS = {
 TIMEFRAME_YEARS = {
     "1d": 5,
     "1h": 5,
-    "5m": 2,
 }
 
 exchange = ccxt.binanceusdm({

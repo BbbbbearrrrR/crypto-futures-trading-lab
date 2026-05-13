@@ -1,7 +1,7 @@
 # Crypto Futures Trading Lab
 
 Systematic crypto futures research workspace for BTC / ETH / SOL / HYPE (Binance USD-M),
-including backtests, 5m intraday experiments, parameter tuning, and paper trading.
+including backtests, parameter tuning, and paper trading.
 
 ---
 
@@ -65,18 +65,16 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
 │   ├── backtest_martingale.py
 │   ├── backtest_breakout.py
 │   ├── backtest_calmar.py
-│   ├── backtest_regime.py
-│   └── backtest_5m_vwap.py
+│   └── backtest_regime.py
 ├── paper/
 │   ├── paper_trade_calmar.py
 │   ├── paper_trade_breakout.py
 │   ├── paper_trade_martingale.py
 │   └── paper_trade_regime.py
 ├── data/
-│   ├── btc_futures_5m.csv
 │   ├── btc_futures_1h.csv
 │   ├── btc_futures_1d.csv
-│   └── ...                       # eth / sol / hype, 5m + 1h + 1d
+│   └── ...                       # eth / sol / hype, 1h + 1d
 └── results/
     ├── martingale/
     │   ├── best_params.json
@@ -85,10 +83,9 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
     │   ├── best_params.json
     │   └── best_results_table.txt
     ├── calmar/
-        ├── best_params.json
-        └── best_results_table.txt
-    ├── regime/
-    └── vwap_5m/
+    │   ├── best_params.json
+    │   └── best_results_table.txt
+    └── regime/
 ```
 
 ---
@@ -112,7 +109,6 @@ python backtest/backtest_martingale.py
 python backtest/backtest_breakout.py
 python backtest/backtest_calmar.py
 python backtest/backtest_regime.py
-python backtest/backtest_5m_vwap.py
 
 # 3. Run grid search (set AUTO_TUNE = True — default)
 #    Uses multiprocessing (spawn), 16 workers by default
