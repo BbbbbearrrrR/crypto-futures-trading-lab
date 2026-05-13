@@ -194,6 +194,7 @@ _COIN_SYMBOLS = {
     "eth":  "ETH/USDT:USDT",
     "sol":  "SOL/USDT:USDT",
     "hype": "HYPE/USDT:USDT",
+    "sui":  "SUI/USDT:USDT",
 }
 
 @app.route("/api/candles/<coin>")

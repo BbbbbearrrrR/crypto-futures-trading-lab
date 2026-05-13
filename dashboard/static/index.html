@@ -283,6 +283,7 @@
         <button class="chart-tab" data-coin="eth">ETH</button>
         <button class="chart-tab" data-coin="sol">SOL</button>
         <button class="chart-tab" data-coin="hype">HYPE</button>
+        <button class="chart-tab" data-coin="sui">SUI</button>
       </div>
       <div id="btc-chart-container"></div>
     </div>
@@ -309,8 +310,8 @@
 
 <script>
 const STRATEGIES = ["breakout", "calmar", "regime"];
-const COINS      = ["btc", "eth", "sol", "hype"];
-const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa" };
+const COINS      = ["btc", "eth", "sol", "hype", "sui"];
+const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa", sui: "#4da2ff" };
 
 let activeTab = "breakout";
 let summaryCache = {};

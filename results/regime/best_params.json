@@ -154,5 +154,44 @@
       "MR_SL_MULT": 0.5,
       "MR_TP_RR": 1.5
     }
+  },
+  "sui": {
+    "best_score": 0.664242,
+    "max_hold_ratio": 0.03204,
+    "optimize_target": "calmar",
+    "params": {
+      "LEVERAGE": 2,
+      "BASE_RISK": 0.01,
+      "USE_VOL_TARGET": true,
+      "VOL_TARGET": 0.3,
+      "VOL_LOOKBACK": 24,
+      "DONCHIAN_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_MULT": 1.0,
+      "TP_RR": 3.0,
+      "TREND_EMA_PERIOD": 200,
+      "ADX_PERIOD": 14,
+      "ADX_MIN": 0.0,
+      "ADX_SLOPE_BARS": 0,
+      "VOL_MA_PERIOD": 20,
+      "VOL_MULT": 1.0,
+      "USE_TRAIL": false,
+      "TRAIL_TRIGGER_R": 1.0,
+      "TRAIL_MULT": 1.0,
+      "COOLDOWN_BARS": 0,
+      "USE_PARTIAL_TP": true,
+      "PARTIAL_TP_R": 1.5,
+      "PARTIAL_TP_FRAC": 0.5,
+      "USE_PULLBACK": false,
+      "PULLBACK_ATR": 0.5,
+      "PULLBACK_WINDOW": 6,
+      "MAX_HOLD_BARS": 0,
+      "OPTIMIZE_TARGET": "calmar",
+      "REGIME_ADX_THRESHOLD": 25.0,
+      "BOLL_PERIOD": 20,
+      "BOLL_STD": 2.5,
+      "MR_SL_MULT": 0.5,
+      "MR_TP_RR": 1.5
+    }
   }
 }

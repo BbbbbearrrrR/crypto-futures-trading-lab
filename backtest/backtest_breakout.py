@@ -80,6 +80,7 @@ COINS = [
     ("ETH/USDT:USDT", "eth"),
     ("SOL/USDT:USDT", "sol"),
     ("HYPE/USDT:USDT", "hype"),
+    ("SUI/USDT:USDT", "sui"),
 ]
 
 
@@ -386,11 +387,12 @@ def current_params() -> dict:
     }
 
 
-def run_once(verbose: bool = True) -> tuple:
+def run_once(verbose: bool = True, coins=None) -> tuple:
+    active_coins = coins if coins is not None else COINS
     coin_returns: dict    = {}
     coin_hold_ratios: dict = {}
     coin_metrics: dict    = {}
-    for symbol, coin in COINS:
+    for symbol, coin in active_coins:
         result = run_backtest(symbol, coin) if verbose else _run_silent(symbol, coin)
         if result is not None:
             _, ret, hold_ratio, m = result
@@ -424,8 +426,9 @@ def _worker_init():
 
 
 def _tune_worker(p: dict):
+    coins_filter = p.pop('_coins', None)
     _apply_params(p)
-    avg_ret, coin_returns, coin_hold_ratios, _ = run_once(verbose=False)
+    avg_ret, coin_returns, coin_hold_ratios, _ = run_once(verbose=False, coins=coins_filter)
     return p, avg_ret, coin_returns, coin_hold_ratios, current_params()
 
 
@@ -469,16 +472,17 @@ def _save_best_results_table():
     print(f"Best results table saved to {out_file}")
 
 
-def auto_tune():
+def auto_tune(coins=None):
     import itertools
     import multiprocessing as mp
+    active_coins = coins if coins is not None else COINS
     keys   = list(TUNE_SPACE.keys())
     values = list(TUNE_SPACE.values())
-    combos = [dict(zip(keys, c)) for c in itertools.product(*values)]
+    combos = [{**dict(zip(keys, c)), '_coins': active_coins} for c in itertools.product(*values)]
     total  = len(combos)
     n_workers = min(16, max(1, mp.cpu_count() - 1))
     print(f"\n{'='*60}")
-    print(f"  AUTO-TUNE  |  {total} combinations  |  {len(COINS)} coins each")
+    print(f"  AUTO-TUNE  |  {total} combinations  |  {len(active_coins)} coins each")
     print(f"  Workers    |  {n_workers} parallel processes (spawn)")
     print(f"{'='*60}")
 
@@ -520,8 +524,21 @@ def auto_tune():
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--coin', type=str, default=None,
+                        help='Run autotune/backtest for a single coin only (e.g. --coin sui)')
+    args, _ = parser.parse_known_args()
+    coins_filter = None
+    if args.coin:
+        coins_filter = [(s, c) for s, c in COINS if c == args.coin.lower()]
+        if not coins_filter:
+            print(f"Unknown coin '{args.coin}'. Available: {[c for _, c in COINS]}")
+            return
+        print(f"[--coin] Filtering to: {coins_filter}")
+
     if AUTO_TUNE:
-        auto_tune()
+        auto_tune(coins=coins_filter)
         return
 
     print("Trend Breakout Backtest")

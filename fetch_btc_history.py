@@ -23,6 +23,7 @@ SYMBOLS = {
     "ETH/USDT:USDT": "eth",
     "SOL/USDT:USDT": "sol",
     "HYPE/USDT:USDT": "hype",
+    "SUI/USDT:USDT": "sui",
 }
 
 # timeframe -> how many years back to fetch  (0 = skip)

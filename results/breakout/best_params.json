@@ -82,5 +82,26 @@
       "TRAIL_MULT": 1.0,
       "COOLDOWN_BARS": 0
     }
+  },
+  "sui": {
+    "best_return": 8.285133,
+    "max_hold_ratio": 0.09121,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.02,
+      "DONCHIAN_PERIOD": 40,
+      "ATR_PERIOD": 14,
+      "SL_MULT": 1.0,
+      "TP_RR": 3.0,
+      "TREND_EMA_PERIOD": 50,
+      "ADX_PERIOD": 14,
+      "ADX_MIN": 20.0,
+      "VOL_MA_PERIOD": 20,
+      "VOL_MULT": 1.0,
+      "USE_TRAIL": false,
+      "TRAIL_TRIGGER_R": 1.0,
+      "TRAIL_MULT": 1.0,
+      "COOLDOWN_BARS": 0
+    }
   }
 }
