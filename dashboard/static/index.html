@@ -320,7 +320,7 @@ let lastCycleKey = "";  // track last seen cycle timestamps to detect new cycles
 let _chart = null, _candleSeries = null, _volSeries = null, _priceLines = [];
 let _activeChartCoin = 'btc';
 const INITIAL_CAP_PER_COIN = 10000;
-const TOTAL_INITIAL = 3 * 4 * INITIAL_CAP_PER_COIN; // 3 strategies × 4 coins
+const TOTAL_INITIAL = STRATEGIES.length * COINS.length * INITIAL_CAP_PER_COIN;
 
 /* ── Overview ── */
 function computeOverview(summaryData, prices) {
