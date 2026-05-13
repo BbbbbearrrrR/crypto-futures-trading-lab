@@ -1,0 +1,86 @@
+{
+  "btc": {
+    "capital": 10000.0,
+    "peak_cap": 10000.0,
+    "in_trade": true,
+    "direction": "long",
+    "entry_price": 80945.0,
+    "sl_price": 80656.69148263837,
+    "tp_price": 82386.54258680815,
+    "notional": 56151.6536110301,
+    "trail_active": false,
+    "trail_sl": 80656.69148263837,
+    "cooldown_remaining": 0,
+    "open_time": "2026-05-13 01:00:00+00:00",
+    "trades": []
+  },
+  "eth": {
+    "capital": 9761.031750470254,
+    "peak_cap": 10000.0,
+    "in_trade": false,
+    "direction": "short",
+    "entry_price": 2272.91,
+    "sl_price": 2284.575445727886,
+    "tp_price": 2214.5827713605695,
+    "notional": 38968.24952974815,
+    "trail_active": false,
+    "trail_sl": 2284.575445727886,
+    "cooldown_remaining": 0,
+    "open_time": null,
+    "trades": [
+      {
+        "timestamp": "2026-05-12 19:00:00+00:00",
+        "coin": "eth",
+        "direction": "short",
+        "entry_price": 2272.91,
+        "exit_price": 2284.575446,
+        "notional": 38968.2495,
+        "exit_reason": "SL",
+        "pnl_usdt": -238.9682,
+        "capital": 9761.0318
+      }
+    ]
+  },
+  "sol": {
+    "capital": 10000.0,
+    "peak_cap": 10000.0,
+    "in_trade": false,
+    "direction": null,
+    "entry_price": 0.0,
+    "sl_price": 0.0,
+    "tp_price": 0.0,
+    "notional": 0.0,
+    "trail_active": false,
+    "trail_sl": 0.0,
+    "cooldown_remaining": 0,
+    "open_time": null,
+    "trades": []
+  },
+  "hype": {
+    "capital": 9780.602311489341,
+    "peak_cap": 10000.0,
+    "in_trade": false,
+    "direction": "short",
+    "entry_price": 39.855,
+    "sl_price": 40.26592524996575,
+    "tp_price": 37.800373750171254,
+    "notional": 19397.688510658285,
+    "trail_active": false,
+    "trail_sl": 40.26592524996575,
+    "cooldown_remaining": 0,
+    "open_time": null,
+    "trades": [
+      {
+        "timestamp": "2026-05-12 18:00:00+00:00",
+        "coin": "hype",
+        "direction": "short",
+        "entry_price": 39.855,
+        "exit_price": 40.265925,
+        "notional": 19397.6885,
+        "exit_reason": "SL",
+        "pnl_usdt": -219.3977,
+        "capital": 9780.6023
+      }
+    ]
+  }
+}

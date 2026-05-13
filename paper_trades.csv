@@ -1,0 +1,2 @@
+timestamp,coin,direction,entry_price,exit_price,notional,exit_reason,pnl_usdt,capital
+2026-05-12 19:00:00+00:00,eth,short,2272.91,2284.575446,19484.1248,SL,-119.4841,9880.5159
