@@ -21,7 +21,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _PAPER = _ROOT / "paper"
 _LOGS  = _ROOT / "logs"
 
-STRATEGIES = ["breakout", "calmar", "martingale", "regime"]
+STRATEGIES = ["breakout", "calmar", "regime"]
 COINS      = ["btc", "eth", "sol", "hype"]
 
 COIN_SYMBOLS = {
@@ -165,22 +165,6 @@ def api_summary():
             }
 
         log_info = _parse_log_tail(strat)
-
-        # Compute unrealized PnL using latest close from log signals
-        close_map = {s["coin"]: s["close"] for s in log_info["signals"]}
-        for coin in COINS:
-            cs = state.get(coin, {})
-            if cs.get("in_trade") and cs.get("entry_price") and coin in close_map:
-                entry   = cs["entry_price"]
-                notional = cs.get("notional", 0.0)
-                cur     = close_map[coin]
-                direction = cs.get("direction")
-                if entry > 0 and notional > 0:
-                    price_chg = (cur - entry) / entry
-                    upnl = notional * price_chg * (1 if direction == "long" else -1)
-                    coins_data[coin]["current_price"] = cur
-                    coins_data[coin]["unrealized_pnl"] = round(upnl, 2)
-                    coins_data[coin]["unrealized_pct"] = round(upnl / 10000.0 * 100, 2)
 
         result[strat] = {
             "total_capital": round(total_capital, 2),

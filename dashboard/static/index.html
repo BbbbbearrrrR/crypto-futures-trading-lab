@@ -81,10 +81,23 @@
   .pnl-neg { color: var(--red); font-weight: 600; }
   .empty-msg { color: var(--muted); padding: 20px 0; text-align: center; }
 
+  /* ── Overview bar ── */
+  .overview-bar {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 20px;
+  }
+  .ov-item { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+  .ov-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .ov-value { font-size: 18px; font-weight: 700; }
+  .ov-sub   { font-size: 11px; color: var(--muted); }
+  .ov-divider { width: 1px; background: var(--border); align-self: stretch; margin: 0 4px; }
+
   /* responsive */
   @media (max-width: 600px) {
     .strategy-grid { grid-template-columns: 1fr; }
     header { flex-direction: column; gap: 8px; align-items: flex-start; }
+    .ov-divider { display: none; }
   }
 </style>
 </head>
@@ -92,10 +105,49 @@
 
 <header>
   <h1>📊 Paper Trading Dashboard</h1>
-  <div id="refresh-info">自动刷新 30s · 上次更新：<span id="last-updated">—</span></div>
+  <div id="refresh-info">价格实时刷新 10s · 上次更新：<span id="last-updated">—</span></div>
 </header>
 
 <main>
+  <!-- ── Overview bar ── -->
+  <div class="overview-bar" id="overview-bar">
+    <div class="ov-item">
+      <div class="ov-label">总资金</div>
+      <div class="ov-value" id="ov-capital">—</div>
+      <div class="ov-sub" id="ov-capital-sub"></div>
+    </div>
+    <div class="ov-divider"></div>
+    <div class="ov-item">
+      <div class="ov-label">已实现盈亏</div>
+      <div class="ov-value" id="ov-realized">—</div>
+      <div class="ov-sub" id="ov-realized-sub"></div>
+    </div>
+    <div class="ov-divider"></div>
+    <div class="ov-item">
+      <div class="ov-label">未实现盈亏</div>
+      <div class="ov-value" id="ov-unrealized">—</div>
+      <div class="ov-sub" id="ov-unrealized-sub"></div>
+    </div>
+    <div class="ov-divider"></div>
+    <div class="ov-item">
+      <div class="ov-label">综合收益率</div>
+      <div class="ov-value" id="ov-return">—</div>
+      <div class="ov-sub" id="ov-return-sub"></div>
+    </div>
+    <div class="ov-divider"></div>
+    <div class="ov-item">
+      <div class="ov-label">持仓数</div>
+      <div class="ov-value" id="ov-pos">—</div>
+      <div class="ov-sub">/ 12 仓位</div>
+    </div>
+    <div class="ov-divider"></div>
+    <div class="ov-item">
+      <div class="ov-label">总成交笔数</div>
+      <div class="ov-value" id="ov-trades">—</div>
+      <div class="ov-sub" id="ov-winrate"></div>
+    </div>
+  </div>
+
   <div class="strategy-grid" id="strategy-grid">
     <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">加载中…</div>
   </div>
@@ -110,13 +162,80 @@
 </main>
 
 <script>
-const STRATEGIES = ["breakout", "calmar", "martingale", "regime"];
+const STRATEGIES = ["breakout", "calmar", "regime"];
 const COINS      = ["btc", "eth", "sol", "hype"];
 const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa" };
 
 let activeTab = "breakout";
 let summaryCache = {};
+let pricesCache  = {};
 let lastCycleKey = "";  // track last seen cycle timestamps to detect new cycles
+const INITIAL_CAP_PER_COIN = 10000;
+const TOTAL_INITIAL = 3 * 4 * INITIAL_CAP_PER_COIN; // 3 strategies × 4 coins
+
+/* ── Overview ── */
+function computeOverview(summaryData, prices) {
+  let totalCurrent = 0, totalUnrealized = 0, openPos = 0;
+  let totalTrades = 0, totalWins = 0;
+  STRATEGIES.forEach(strat => {
+    const s = summaryData[strat];
+    if (!s) return;
+    COINS.forEach(coin => {
+      const c = s.coins[coin] || {};
+      totalCurrent += c.capital ?? INITIAL_CAP_PER_COIN;
+      const cur = prices[coin];
+      if (cur && c.entry_price && c.direction && c.notional) {
+        const chg = (cur - c.entry_price) / c.entry_price;
+        totalUnrealized += c.notional * chg * (c.direction === "long" ? 1 : -1);
+      }
+      if (c.direction) openPos++;
+      totalTrades += c.total_trades || 0;
+      if (c.win_rate != null && c.total_trades) totalWins += c.win_rate / 100 * (c.total_trades || 0);
+    });
+  });
+  const realized   = totalCurrent - TOTAL_INITIAL;
+  const combined   = realized + totalUnrealized;
+  const returnPct  = combined / TOTAL_INITIAL * 100;
+  const realPct    = realized  / TOTAL_INITIAL * 100;
+  const unrPct     = totalUnrealized / TOTAL_INITIAL * 100;
+  const winRate    = totalTrades > 0 ? (totalWins / totalTrades * 100) : null;
+  return { totalCurrent, realized, totalUnrealized, combined, returnPct, realPct, unrPct, totalTrades, winRate, openPos };
+}
+
+function renderOverview(ov) {
+  const sign = v => v >= 0 ? "+" : "";
+  const cls  = v => v >= 0 ? "var(--green)" : "var(--red)";
+  const fmt  = v => `${sign(v)}$${Math.abs(v).toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2})}${v>=0?"":""}` ;
+  const fmtP = v => `${sign(v)}${v.toFixed(2)}%`;
+
+  const capEl = document.getElementById("ov-capital");
+  capEl.textContent = "$" + ov.totalCurrent.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById("ov-capital-sub").textContent =
+    "初始 $" + TOTAL_INITIAL.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  const realEl = document.getElementById("ov-realized");
+  realEl.textContent = (ov.realized >= 0 ? "+" : "") + "$" + ov.realized.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+  realEl.style.color = cls(ov.realized);
+  document.getElementById("ov-realized-sub").textContent = fmtP(ov.realPct);
+  document.getElementById("ov-realized-sub").style.color = cls(ov.realized);
+
+  const unrEl = document.getElementById("ov-unrealized");
+  unrEl.textContent = (ov.totalUnrealized >= 0 ? "+" : "") + "$" + ov.totalUnrealized.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+  unrEl.style.color = cls(ov.totalUnrealized);
+  document.getElementById("ov-unrealized-sub").textContent = fmtP(ov.unrPct);
+  document.getElementById("ov-unrealized-sub").style.color = cls(ov.totalUnrealized);
+
+  const retEl = document.getElementById("ov-return");
+  retEl.textContent = fmtP(ov.returnPct);
+  retEl.style.color = cls(ov.returnPct);
+  document.getElementById("ov-return-sub").textContent = (ov.combined >= 0 ? "+" : "") + "$" + ov.combined.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById("ov-return-sub").style.color = cls(ov.combined);
+
+  document.getElementById("ov-pos").textContent = ov.openPos;
+  document.getElementById("ov-trades").textContent = ov.totalTrades;
+  const wrEl = document.getElementById("ov-winrate");
+  wrEl.textContent = ov.winRate != null ? `胜率 ${ov.winRate.toFixed(1)}%` : "";
+}
 
 /* ── helpers ── */
 function retClass(v) {
@@ -261,6 +380,7 @@ async function refresh() {
     renderSummary(summaryCache);
     document.getElementById("last-updated").textContent =
       new Date().toLocaleTimeString("zh");
+    renderOverview(computeOverview(summaryCache, pricesCache));
     await refreshPrices();
   } catch(e) {
     console.error("fetch error", e);
@@ -272,6 +392,8 @@ async function refreshPrices() {
   try {
     const res = await fetch("/api/prices");
     const prices = await res.json();
+    pricesCache = prices;
+    renderOverview(computeOverview(summaryCache, prices));
     document.querySelectorAll("[data-upnl]").forEach(td => {
       const entry     = parseFloat(td.dataset.entry);
       const notional  = parseFloat(td.dataset.notional);
@@ -298,6 +420,7 @@ async function refreshPrices() {
       lastCycleKey = cycleKey;
       summaryCache = fresh;
       renderSummary(fresh);
+      renderOverview(computeOverview(fresh, prices));
       document.getElementById("last-updated").textContent =
         new Date().toLocaleTimeString("zh") + " ✓new cycle";
       // re-run price overlay immediately after re-render
