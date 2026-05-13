@@ -202,6 +202,16 @@ Best params per coin are saved to `results/*/best_params.json` and updated incre
 
 ---
 
+## Acknowledgements
+
+- **[ccxt](https://github.com/ccxt/ccxt)** — unified crypto exchange API (MIT)
+- **[lightweight-charts](https://github.com/tradingview/lightweight-charts)** — open-source charting library by TradingView (Apache-2.0)
+- **[pandas](https://github.com/pandas-dev/pandas)** / **[NumPy](https://github.com/numpy/numpy)** — data processing
+- **[Flask](https://github.com/pallets/flask)** — dashboard backend
+- **[Binance](https://www.binance.com)** — market data source
+
+---
+
 ## Disclaimer
 
 Research / paper trading only. Past backtest performance does not guarantee future results. No real capital is deployed.
