@@ -1,7 +1,28 @@
 # Crypto Futures Trading Lab
 
-Systematic crypto futures research workspace for BTC / ETH / SOL / HYPE (Binance USD-M),
-including backtests, parameter tuning, and paper trading.
+Systematic crypto futures research workspace for **BTC / ETH / SOL / HYPE** (Binance USD-M perpetuals),  
+covering data collection, strategy backtesting, parameter optimisation, paper trading, and a live monitoring dashboard.
+
+---
+
+## Dashboard
+
+![Paper Trading Dashboard](paper_trade_dashboard.png)
+
+A Flask-based web dashboard (`dashboard/app.py`) running at **http://localhost:5050** with:
+
+- **Overview bar** — total capital, realised PnL, unrealised PnL, combined return, open positions, trade count
+- **Strategy cards** — per-coin capital, return %, unrealised PnL (live), trade count, win rate, entry/current price
+- **BTC / USDT 1H candlestick chart** — live K-line data via ccxt, volume histogram, and entry / SL / TP overlay lines for all active positions
+- **Trades drawer** — slide-in sidebar (right edge button) showing full trade history per strategy
+
+```bash
+# Start dashboard only (crypto conda env required)
+/home/bear/Softwares/anaconda3/envs/crypto/bin/python dashboard/app.py
+
+# Or start everything (paper traders + dashboard)
+./start_paper_trades.sh
+```
 
 ---
 
@@ -9,28 +30,34 @@ including backtests, parameter tuning, and paper trading.
 
 ### 1. Martingale — `backtest_martingale.py`
 
-Bollinger Band pullback with loss-side martingale adds and profit-side pyramiding.
+Bollinger Band mean-reversion with loss-side equal-size averaging and profit-side pyramiding.
 
 | Component | Detail |
 |---|---|
-| Entry | 1h close touches lower/upper BB band |
+| Entry | 1h close touches lower / upper BB band |
 | Trend filter | 1d EMA direction |
-| Loss adds | Equal-size adds at fixed grid step |
+| Loss adds | Equal-size adds at fixed `GRID_STEP_RATE` intervals |
 | Profit adds | Pyramid on BB mid-line cross (decreasing size) |
-| TP | Fixed margin-rate from average entry |
-| SL | Capital-% hard stop |
+| TP | Fixed `TP_MARGIN_RATE` × margin from average entry |
+| SL | Hard stop when loss reaches `SL_CAPITAL_RATE` × total capital |
+| Leverage | 50× |
+
+---
 
 ### 2. Trend Breakout — `backtest_breakout.py`
 
-Donchian channel breakout with ATR-based stops, optimised for total return.
+Donchian channel breakout optimised for total return.
 
 | Component | Detail |
 |---|---|
-| Entry | 1h close breaks Donchian high/low |
-| Trend filter | 1d EMA |
-| Filters | ADX strength + volume spike |
+| Entry | 1h close breaks Donchian high / low |
+| Trend filter | 1d close > EMA(200) |
+| Filters | ADX > threshold + volume spike |
 | SL / TP | ATR × multiplier / fixed R:R |
 | Trailing stop | Optional, ATR-based |
+| Leverage | 10–20× |
+
+---
 
 ### 3. Calmar-Optimised Breakout — `backtest_calmar.py`
 
@@ -42,17 +69,25 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
 | Sizing | Volatility targeting: `notional = capital × VOL_TARGET / realised_vol` |
 | Partial TP | Close 50 % at +1R, trail remainder |
 | ADX slope | Require ADX rising over N bars |
-| Time exit | Force-close after MAX_HOLD_BARS |
+| Time exit | Force-close after `MAX_HOLD_BARS` |
 | Optimise | Calmar ratio (CAGR / MaxDD) |
+| Leverage | 2–5× (conservative) |
 
-**Best out-of-sample results (per-coin optimal params, $10k initial):**
+**Best backtest results (per-coin optimal params, $10k initial):**
 
 | Coin | Trades | Win% | Ann Return | Max DD | Sharpe | Calmar |
 |---|---|---|---|---|---|---|
-| BTC | 776 | 34.9% | 56.1% | 13.7% | 1.63 | 4.08 |
-| ETH | 882 | 25.9% | 68.7% | 15.1% | 1.49 | 4.54 |
-| SOL | 627 | 31.1% | 51.4% | 11.3% | 1.46 | 4.55 |
-| HYPE | 84 | 36.9% | 48.7% | 4.2% | 1.98 | 11.68 |
+| BTC  | 776 | 34.9% | 56.1% | 13.7% | 1.63 |  4.08 |
+| ETH  | 882 | 25.9% | 68.7% | 15.1% | 1.49 |  4.54 |
+| SOL  | 627 | 31.1% | 51.4% | 11.3% | 1.46 |  4.55 |
+| HYPE |  84 | 36.9% | 48.7% |  4.2% | 1.98 | 11.68 |
+
+---
+
+### 4. Regime — `backtest_regime.py`
+
+Calmar-variant with market-regime detection layer (trend / mean-reversion mode switching).  
+Results saved to `results/regime/`.
 
 ---
 
@@ -60,32 +95,37 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
 
 ```
 .
-├── fetch_btc_history.py          # Fetch OHLCV data from Binance via ccxt
+├── fetch_btc_history.py          # Fetch OHLCV from Binance via ccxt → data/
+├── start_paper_trades.sh         # Launch all paper traders + dashboard (crypto env)
+│
 ├── backtest/
-│   ├── backtest_martingale.py
-│   ├── backtest_breakout.py
-│   ├── backtest_calmar.py
-│   └── backtest_regime.py
+│   ├── backtest_martingale.py    # Strategy 1: BB martingale
+│   ├── backtest_breakout.py      # Strategy 2: Donchian breakout (return-optimised)
+│   ├── backtest_calmar.py        # Strategy 3: Donchian breakout (Calmar-optimised)
+│   └── backtest_regime.py        # Strategy 4: Regime-switching breakout
+│
 ├── paper/
-│   ├── paper_trade_calmar.py
-│   ├── paper_trade_breakout.py
+│   ├── paper_trade_breakout.py   # Live paper trader — imports backtest_breakout
+│   ├── paper_trade_calmar.py     # Live paper trader — imports backtest_calmar
 │   ├── paper_trade_martingale.py
 │   └── paper_trade_regime.py
+│
+├── dashboard/
+│   ├── app.py                    # Flask backend (port 5050)
+│   └── static/index.html         # Single-page dashboard UI
+│
 ├── data/
-│   ├── btc_futures_1h.csv
+│   ├── btc_futures_1h.csv        # 5 years of 1h candles
 │   ├── btc_futures_1d.csv
 │   └── ...                       # eth / sol / hype, 1h + 1d
-└── results/
-    ├── martingale/
-    │   ├── best_params.json
-    │   └── best_results_table.txt
-    ├── breakout/
-    │   ├── best_params.json
-    │   └── best_results_table.txt
-    ├── calmar/
-    │   ├── best_params.json
-    │   └── best_results_table.txt
-    └── regime/
+│
+├── results/
+│   ├── breakout/best_params.json
+│   ├── calmar/best_params.json
+│   ├── martingale/best_params.json
+│   └── regime/best_params.json
+│
+└── logs/                         # Paper trader + dashboard runtime logs
 ```
 
 ---
@@ -93,7 +133,9 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
 ## Setup
 
 ```bash
-pip install ccxt pandas numpy tqdm
+conda create -n crypto python=3.11
+conda activate crypto
+pip install ccxt pandas numpy tqdm flask
 ```
 
 ---
@@ -101,23 +143,28 @@ pip install ccxt pandas numpy tqdm
 ## Usage
 
 ```bash
-# 1. Fetch data (run once, or to refresh)
+# 1. Fetch / refresh OHLCV data (BTC / ETH / SOL / HYPE, 1h + 1d, 5 years)
 python fetch_btc_history.py
 
-# 2. Run any strategy — single pass (set AUTO_TUNE = False inside the file)
-python backtest/backtest_martingale.py
-python backtest/backtest_breakout.py
-python backtest/backtest_calmar.py
-python backtest/backtest_regime.py
-
-# 3. Run grid search (set AUTO_TUNE = True — default)
-#    Uses multiprocessing (spawn), 16 workers by default
+# 2. Backtest — single run (set AUTO_TUNE = False inside the file)
 python backtest/backtest_calmar.py
 
-# 4. Run in background, log to file
+# 3. Grid search (AUTO_TUNE = True, default) — uses multiprocessing
 nohup python -u backtest/backtest_calmar.py > results/calmar/run.log 2>&1 &
-echo PID=$!
 tail -f results/calmar/run.log
+
+# 4. Paper trading + dashboard (all strategies, crypto env)
+./start_paper_trades.sh
+
+# 5. Dashboard only
+/home/bear/Softwares/anaconda3/envs/crypto/bin/python dashboard/app.py
+# → http://localhost:5050
+```
+
+Paper traders run a live signal loop synced to hourly candle closes. State is persisted in `paper/paper_state_*.json`; trades are appended to `paper/paper_trades_*.csv`. Pass `--reset` to wipe state:
+
+```bash
+./start_paper_trades.sh --reset
 ```
 
 ---
@@ -127,7 +174,7 @@ tail -f results/calmar/run.log
 | Parameter | Default | Description |
 |---|---|---|
 | `LEVERAGE` | 3 | Max leverage cap |
-| `USE_VOL_TARGET` | True | Size by realised volatility |
+| `USE_VOL_TARGET` | `True` | Size by realised volatility |
 | `VOL_TARGET` | 0.20 | Target annual portfolio volatility |
 | `DONCHIAN_PERIOD` | 20 | Breakout channel lookback (bars) |
 | `ATR_PERIOD` | 14 | ATR smoothing period |
@@ -136,18 +183,18 @@ tail -f results/calmar/run.log
 | `TREND_EMA_PERIOD` | 200 | Daily EMA for trend filter |
 | `ADX_MIN` | 25.0 | Minimum ADX to enter (0 = off) |
 | `ADX_SLOPE_BARS` | 3 | Require ADX rising over N bars |
-| `USE_PARTIAL_TP` | True | Close 50 % at +1R, trail rest |
-| `PARTIAL_TP_R` | 1.0 | First exit at entry + SL×R |
-| `USE_PULLBACK` | False | Wait for pullback before entry |
+| `USE_PARTIAL_TP` | `True` | Close 50 % at +1R, trail rest |
+| `PARTIAL_TP_R` | 1.0 | First exit at entry + SL × R |
+| `USE_PULLBACK` | `False` | Wait for pullback before entry |
 | `MAX_HOLD_BARS` | 0 | Force close after N bars (0 = off) |
-| `OPTIMIZE_TARGET` | "calmar" | Ranking metric: calmar / sharpe / return |
+| `OPTIMIZE_TARGET` | `"calmar"` | Ranking metric: `calmar` / `sharpe` / `return` |
 | `MIN_TRADE_COUNT` | 30 | Minimum trades to qualify a combo |
 
 ---
 
 ## Metrics Output
 
-Each run prints a summary table with:
+Each backtest run prints a summary table per coin:
 
 `Trades` · `Win%` · `AvgWin$` · `AvgLoss$` · `Profit Factor` · `Expectancy` · `Ann Return%` · `Max DD%` · `Sharpe` · `Calmar`
 
@@ -157,5 +204,4 @@ Best params per coin are saved to `results/*/best_params.json` and updated incre
 
 ## Disclaimer
 
-Research backtest only. Past performance does not guarantee future results.
-Futures trading involves significant risk of capital loss.
+Research / paper trading only. Past backtest performance does not guarantee future results. No real capital is deployed.
