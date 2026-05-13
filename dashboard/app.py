@@ -34,6 +34,8 @@ COIN_SYMBOLS = {
 _exchange = ccxt.binance({"options": {"defaultType": "future"}})
 _exchange.set_sandbox_mode(True)
 
+_exchange_pub = ccxt.binanceusdm({"enableRateLimit": True})
+
 
 def _load_state(strategy: str) -> dict:
     path = _PAPER / f"paper_state_{strategy}.json"
@@ -185,6 +187,27 @@ def api_trades(strategy: str):
         return jsonify({"error": "unknown strategy"}), 404
     trades = _load_trades(strategy)
     return jsonify(trades)
+
+
+@app.route("/api/candles/btc")
+def api_candles_btc():
+    """Return last 300 1h BTC candles fetched live from Binance via ccxt."""
+    try:
+        ohlcv = _exchange_pub.fetch_ohlcv("BTC/USDT:USDT", timeframe="1h", limit=300)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+    result = [
+        {
+            "time":   row[0] // 1000,   # ms → s
+            "open":   row[1],
+            "high":   row[2],
+            "low":    row[3],
+            "close":  row[4],
+            "volume": row[5],
+        }
+        for row in ohlcv
+    ]
+    return jsonify(result)
 
 
 @app.route("/")

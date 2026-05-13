@@ -99,7 +99,83 @@
     header { flex-direction: column; gap: 8px; align-items: flex-start; }
     .ov-divider { display: none; }
   }
+
+  /* ── Main layout ── */
+  .main-col { display: flex; flex-direction: column; gap: 20px; }
+
+  /* ── Drawer toggle button ── */
+  .drawer-btn {
+    position: fixed; right: 0; top: 50%;
+    transform: translateY(-50%);
+    z-index: 200;
+    writing-mode: vertical-rl; text-orientation: mixed;
+    padding: 14px 8px;
+    background: var(--blue); color: #fff;
+    border: none; border-radius: 8px 0 0 8px;
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    cursor: pointer; user-select: none;
+    box-shadow: -2px 0 12px rgba(0,0,0,.4);
+    transition: background .15s, right .3s;
+  }
+  .drawer-btn:hover { background: #3b8ae0; }
+  .drawer-btn.open  { right: 420px; }
+
+  /* ── Overlay backdrop ── */
+  .drawer-overlay {
+    display: none; position: fixed; inset: 0; z-index: 210;
+    background: rgba(0,0,0,.45);
+  }
+  .drawer-overlay.visible { display: block; }
+
+  /* ── Drawer panel ── */
+  .sidebar {
+    position: fixed; right: 0; top: 0; bottom: 0;
+    width: 420px; z-index: 220;
+    transform: translateX(100%);
+    transition: transform .3s cubic-bezier(.4,0,.2,1);
+    background: var(--card); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar-header h2 { font-size: 14px; font-weight: 600; }
+  .sidebar-close {
+    background: none; border: none; color: var(--muted); font-size: 18px;
+    cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px;
+  }
+  .sidebar-close:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .sidebar-tabs { padding: 8px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .sidebar .strategy-tabs { margin-bottom: 0; }
+  .sidebar-body { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  .sidebar .trades-table-wrap { overflow-x: auto; }
+  .sidebar table.trades { font-size: 11px; }
+  .sidebar table.trades th, .sidebar table.trades td { padding: 4px 7px; }
+
+  /* ── BTC 1H Chart ── */
+  .chart-section {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .chart-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+  }
+  .chart-title { font-weight: 700; font-size: 15px; color: var(--blue); }
+  .chart-price-change { font-size: 12px; font-weight: 600; }
+  .chart-price { font-size: 18px; font-weight: 700; }
+  .chart-meta { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+  .chart-meta b { color: var(--text); }
+  #btc-chart-container { width: 100%; }
+
+  @media (max-width: 600px) {
+    .sidebar { width: 100%; }
+    .drawer-btn.open { right: 100%; }
+  }
 </style>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -148,18 +224,47 @@
     </div>
   </div>
 
-  <div class="strategy-grid" id="strategy-grid">
-    <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">加载中…</div>
-  </div>
+  <div class="main-col">
+    <div class="strategy-grid" id="strategy-grid">
+      <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">加载中…</div>
+    </div>
 
-  <div class="trades-section">
-    <h2>成交记录</h2>
-    <div class="strategy-tabs" id="trade-tabs"></div>
-    <div class="trades-table-wrap" id="trades-body">
-      <p class="empty-msg">选择上方策略查看成交记录</p>
+    <div class="chart-section">
+      <div class="chart-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="chart-title">BTC / USDT · 1H</span>
+          <span class="chart-price-change" id="chart-change"></span>
+        </div>
+        <div class="chart-meta">
+          <span>O <b id="chart-open">—</b></span>
+          <span>H <b id="chart-high">—</b></span>
+          <span>L <b id="chart-low">—</b></span>
+          <span>C <b id="chart-close">—</b></span>
+        </div>
+        <span class="chart-price" id="chart-live-price">—</span>
+      </div>
+      <div id="btc-chart-container"></div>
     </div>
   </div>
 </main>
+
+<!-- ── Trades drawer ── -->
+<button class="drawer-btn" id="drawer-btn" onclick="toggleDrawer()">成交记录</button>
+<div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+<aside class="sidebar" id="trades-drawer">
+  <div class="sidebar-header">
+    <h2>成交记录</h2>
+    <button class="sidebar-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="sidebar-tabs">
+    <div class="strategy-tabs" id="trade-tabs"></div>
+  </div>
+  <div class="sidebar-body">
+    <div class="trades-table-wrap" id="trades-body">
+      <p class="empty-msg">加载中…</p>
+    </div>
+  </div>
+</aside>
 
 <script>
 const STRATEGIES = ["breakout", "calmar", "regime"];
@@ -170,6 +275,7 @@ let activeTab = "breakout";
 let summaryCache = {};
 let pricesCache  = {};
 let lastCycleKey = "";  // track last seen cycle timestamps to detect new cycles
+let _chart = null, _candleSeries = null, _volSeries = null, _priceLines = [];
 const INITIAL_CAP_PER_COIN = 10000;
 const TOTAL_INITIAL = 3 * 4 * INITIAL_CAP_PER_COIN; // 3 strategies × 4 coins
 
@@ -297,6 +403,7 @@ function renderSummary(data) {
         <td>${c.total_trades ?? 0}</td>
         <td>${c.win_rate != null ? c.win_rate + "%" : "—"}</td>
         <td style="color:var(--muted);font-size:12px">${c.entry_price ? c.entry_price.toLocaleString() : "—"}</td>
+        <td data-curprice="${strat}-${coin}" style="font-size:12px">—</td>
       </tr>`;
     }).join("");
 
@@ -322,7 +429,7 @@ function renderSummary(data) {
       <div class="card-body">
         <table class="coin-table">
           <thead><tr>
-            <th>币种</th><th>资金</th><th>收益</th><th>未实现</th><th>笔数</th><th>胜率</th><th>入场价</th>
+            <th>币种</th><th>资金</th><th>收益</th><th>未实现</th><th>笔数</th><th>胜率</th><th>入场价</th><th>现价</th>
           </tr></thead>
           <tbody>${coinRows}</tbody>
         </table>
@@ -335,6 +442,7 @@ function renderSummary(data) {
       </div>`;
     grid.appendChild(card);
   });
+  updateChartPositions();
 }
 
 /* ── Trades render ── */
@@ -394,6 +502,7 @@ async function refreshPrices() {
     const prices = await res.json();
     pricesCache = prices;
     renderOverview(computeOverview(summaryCache, prices));
+    updateChartPrice();
     document.querySelectorAll("[data-upnl]").forEach(td => {
       const entry     = parseFloat(td.dataset.entry);
       const notional  = parseFloat(td.dataset.notional);
@@ -401,6 +510,9 @@ async function refreshPrices() {
       const capital   = parseFloat(td.dataset.capital);
       const key       = td.dataset.upnl.split("-")[1];
       const cur       = prices[key];
+      // update current price cell
+      const curTd = document.querySelector(`[data-curprice="${td.dataset.upnl}"]`);
+      if (curTd) curTd.textContent = cur ? cur.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
       if (!cur || !entry || !direction) { return; }
       const priceChg = (cur - entry) / entry;
       const upnl     = notional * priceChg * (direction === "long" ? 1 : -1);
@@ -437,6 +549,8 @@ async function refreshPricesOnly(prices) {
     const capital   = parseFloat(td.dataset.capital);
     const key       = td.dataset.upnl.split("-")[1];
     const cur       = prices[key];
+    const curTd = document.querySelector(`[data-curprice="${td.dataset.upnl}"]`);
+    if (curTd) curTd.textContent = cur ? cur.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
     if (!cur || !entry || !direction) { return; }
     const priceChg = (cur - entry) / entry;
     const upnl     = notional * priceChg * (direction === "long" ? 1 : -1);
@@ -444,6 +558,102 @@ async function refreshPricesOnly(prices) {
     td.innerHTML    = `<span class="${upnl >= 0 ? 'pos' : 'neg'}">${upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}</span><br><span style="font-size:11px;color:var(--muted)">${upct >= 0 ? '+' : ''}${upct.toFixed(2)}%</span>`;
   });
 }
+
+/* ── BTC 1H Candlestick Chart ── */
+function initChart() {
+  const container = document.getElementById('btc-chart-container');
+  _chart = LightweightCharts.createChart(container, {
+    height: 360,
+    layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
+    grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    handleScroll: true, handleScale: true,
+  });
+  _candleSeries = _chart.addCandlestickSeries({
+    upColor: '#3fb950', downColor: '#f85149',
+    borderUpColor: '#3fb950', borderDownColor: '#f85149',
+    wickUpColor: '#3fb950', wickDownColor: '#f85149',
+  });
+  _volSeries = _chart.addHistogramSeries({
+    priceFormat: { type: 'volume' }, priceScaleId: 'vol',
+    scaleMargins: { top: 0.82, bottom: 0 },
+  });
+  _chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  new ResizeObserver(() => {
+    if (_chart) _chart.applyOptions({ width: container.offsetWidth });
+  }).observe(container);
+}
+
+async function loadCandles() {
+  try {
+    const res = await fetch('/api/candles/btc');
+    const candles = await res.json();
+    if (!candles.length) return;
+    _candleSeries.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    _volSeries.setData(candles.map(c => ({
+      time: c.time, value: c.volume,
+      color: c.close >= c.open ? 'rgba(63,185,80,0.35)' : 'rgba(248,81,73,0.35)',
+    })));
+    const last = candles[candles.length - 1];
+    const prev = candles[candles.length - 2];
+    const chg  = (last.close - prev.close) / prev.close * 100;
+    const fmt  = v => v.toLocaleString('en', { maximumFractionDigits: 2 });
+    document.getElementById('chart-open').textContent  = fmt(last.open);
+    document.getElementById('chart-high').textContent  = fmt(last.high);
+    document.getElementById('chart-low').textContent   = fmt(last.low);
+    document.getElementById('chart-close').textContent = fmt(last.close);
+    const chgEl = document.getElementById('chart-change');
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+    _chart.timeScale().fitContent();
+  } catch(e) { console.error('candle error', e); }
+}
+
+function updateChartPrice() {
+  const p = pricesCache['btc'];
+  const el = document.getElementById('chart-live-price');
+  if (el && p != null) {
+    el.textContent = '$' + p.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+}
+
+function updateChartPositions() {
+  if (!_candleSeries) return;
+  _priceLines.forEach(pl => { try { _candleSeries.removePriceLine(pl); } catch(e) {} });
+  _priceLines = [];
+  STRATEGIES.forEach(strat => {
+    const s = summaryCache[strat]; if (!s) return;
+    const c = s.coins['btc'] || {}; if (!c.direction) return;
+    const add = (price, color, title) => price && _priceLines.push(
+      _candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title })
+    );
+    add(c.entry_price, '#58a6ff', strat + ' entry');
+    add(c.sl_price,    '#f85149', strat + ' SL');
+    add(c.tp_price,    '#3fb950', strat + ' TP');
+  });
+}
+
+/* ── Drawer ── */
+function toggleDrawer() {
+  const open = document.getElementById('trades-drawer').classList.contains('open');
+  open ? closeDrawer() : openDrawer();
+}
+function openDrawer() {
+  document.getElementById('trades-drawer').classList.add('open');
+  document.getElementById('drawer-overlay').classList.add('visible');
+  document.getElementById('drawer-btn').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('trades-drawer').classList.remove('open');
+  document.getElementById('drawer-overlay').classList.remove('visible');
+  document.getElementById('drawer-btn').classList.remove('open');
+}
+
+initChart();
+loadCandles();
+setInterval(loadCandles, 60000);
 
 renderTabs();
 loadTrades(activeTab);
