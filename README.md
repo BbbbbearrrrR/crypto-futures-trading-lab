@@ -4,7 +4,7 @@
 
 # Crypto Futures Trading Lab
 
-Systematic crypto futures research workspace for **BTC / ETH / SOL / HYPE** (Binance USD-M perpetuals),  
+Systematic crypto futures research workspace for **BTC / ETH / SOL / HYPE / SUI** (Binance USD-M perpetuals),  
 covering data collection, strategy backtesting, parameter optimisation, paper trading, and a live monitoring dashboard.
 
 ---
@@ -17,7 +17,7 @@ A Flask-based web dashboard (`dashboard/app.py`) running at **http://localhost:5
 
 - **Overview bar** — total capital, realised PnL, unrealised PnL, combined return, open positions, trade count
 - **Strategy cards** — per-coin capital, return %, unrealised PnL (live), trade count, win rate, entry/current price
-- **BTC / USDT 1H candlestick chart** — live K-line data via ccxt, volume histogram, and entry / SL / TP overlay lines for all active positions
+- **Multi-coin candlestick chart** — BTC / ETH / SOL / HYPE / SUI tabs, live 1H K-line via ccxt, volume histogram, entry / SL / TP overlay lines for active positions; defaults to most recent 75 candles with latest bar at ~75% from left
 - **Trades drawer** — slide-in sidebar (right edge button) showing full trade history per strategy
 
 ```bash
@@ -32,23 +32,7 @@ A Flask-based web dashboard (`dashboard/app.py`) running at **http://localhost:5
 
 ## Strategies
 
-### 1. Martingale — `backtest_martingale.py`
-
-Bollinger Band mean-reversion with loss-side equal-size averaging and profit-side pyramiding.
-
-| Component | Detail |
-|---|---|
-| Entry | 1h close touches lower / upper BB band |
-| Trend filter | 1d EMA direction |
-| Loss adds | Equal-size adds at fixed `GRID_STEP_RATE` intervals |
-| Profit adds | Pyramid on BB mid-line cross (decreasing size) |
-| TP | Fixed `TP_MARGIN_RATE` × margin from average entry |
-| SL | Hard stop when loss reaches `SL_CAPITAL_RATE` × total capital |
-| Leverage | 50× |
-
----
-
-### 2. Trend Breakout — `backtest_breakout.py`
+### 1. Trend Breakout — `backtest_breakout.py`
 
 Donchian channel breakout optimised for total return.
 
@@ -63,7 +47,7 @@ Donchian channel breakout optimised for total return.
 
 ---
 
-### 3. Calmar-Optimised Breakout — `backtest_calmar.py`
+### 2. Calmar-Optimised Breakout — `backtest_calmar.py`
 
 Same breakout mechanics, redesigned for large-capital deployment with conservative drawdown targets.
 
@@ -85,10 +69,11 @@ Same breakout mechanics, redesigned for large-capital deployment with conservati
 | ETH  | 882 | 25.9% | 68.7% | 15.1% | 1.49 |  4.54 |
 | SOL  | 627 | 31.1% | 51.4% | 11.3% | 1.46 |  4.55 |
 | HYPE |  84 | 36.9% | 48.7% |  4.2% | 1.98 | 11.68 |
+| SUI  |   — |    — |    — |    — |    — |     — |
 
 ---
 
-### 4. Regime — `backtest_regime.py`
+### 3. Regime — `backtest_regime.py`
 
 Calmar-variant with market-regime detection layer (trend / mean-reversion mode switching).  
 Results saved to `results/regime/`.
@@ -100,19 +85,19 @@ Results saved to `results/regime/`.
 ```
 .
 ├── fetch_btc_history.py          # Fetch OHLCV from Binance via ccxt → data/
+├── tune.py                       # Dedicated autotune launcher (--coin / --strategy)
 ├── start_paper_trades.sh         # Launch all paper traders + dashboard (crypto env)
 │
 ├── backtest/
-│   ├── backtest_martingale.py    # Strategy 1: BB martingale
-│   ├── backtest_breakout.py      # Strategy 2: Donchian breakout (return-optimised)
-│   ├── backtest_calmar.py        # Strategy 3: Donchian breakout (Calmar-optimised)
-│   └── backtest_regime.py        # Strategy 4: Regime-switching breakout
+│   ├── backtest_breakout.py      # Strategy 1: Donchian breakout (return-optimised)
+│   ├── backtest_calmar.py        # Strategy 2: Donchian breakout (Calmar-optimised)
+│   ├── backtest_regime.py        # Strategy 3: Regime-switching breakout
+│   └── backtest_martingale.py    # Strategy 4: BB martingale (not active in paper trading)
 │
 ├── paper/
 │   ├── paper_trade_breakout.py   # Live paper trader — imports backtest_breakout
 │   ├── paper_trade_calmar.py     # Live paper trader — imports backtest_calmar
-│   ├── paper_trade_martingale.py
-│   └── paper_trade_regime.py
+│   └── paper_trade_regime.py     # Live paper trader — imports backtest_regime
 │
 ├── dashboard/
 │   ├── app.py                    # Flask backend (port 5050)
@@ -121,7 +106,7 @@ Results saved to `results/regime/`.
 ├── data/
 │   ├── btc_futures_1h.csv        # 5 years of 1h candles
 │   ├── btc_futures_1d.csv
-│   └── ...                       # eth / sol / hype, 1h + 1d
+│   └── ...                       # eth / sol / hype / sui, 1h + 1d
 │
 ├── results/
 │   ├── breakout/best_params.json
@@ -142,22 +127,39 @@ conda activate crypto
 pip install ccxt pandas numpy tqdm flask
 ```
 
+### API Keys (optional — Testnet mode only)
+
+Paper traders default to **pure local simulation** (`USE_TESTNET = False`) — no API key is needed.  
+To enable Binance Testnet order execution, set the following environment variables before starting:
+
+```bash
+export BINANCE_API_KEY=your_testnet_api_key
+export BINANCE_API_SECRET=your_testnet_api_secret
+```
+
+Then set `USE_TESTNET = True` at the top of each `paper/paper_trade_*.py` file.  
+Testnet keys can be obtained from [testnet.binancefuture.com](https://testnet.binancefuture.com).
+
+> **Never commit real API keys to version control.**
+
 ---
 
 ## Usage
 
 ```bash
-# 1. Fetch / refresh OHLCV data (BTC / ETH / SOL / HYPE, 1h + 1d, 5 years)
+# 1. Fetch / refresh OHLCV data (BTC / ETH / SOL / HYPE / SUI, 1h + 1d, 5 years)
 python fetch_btc_history.py
 
 # 2. Backtest — single run (set AUTO_TUNE = False inside the file)
 python backtest/backtest_calmar.py
 
-# 3. Grid search (AUTO_TUNE = True, default) — uses multiprocessing
-nohup python -u backtest/backtest_calmar.py > results/calmar/run.log 2>&1 &
-tail -f results/calmar/run.log
+# 3. Autotune — dedicated launcher (uses multiprocessing internally)
+python tune.py                        # all coins, all strategies
+python tune.py --coin sui             # SUI only, all strategies
+python tune.py --coin sui --strategy calmar  # single coin + strategy
+python tune.py --summary              # show current best params, no tuning
 
-# 4. Paper trading + dashboard (all strategies, crypto env)
+# 4. Paper trading + dashboard (breakout / calmar / regime, all 5 coins)
 ./start_paper_trades.sh
 
 # 5. Dashboard only

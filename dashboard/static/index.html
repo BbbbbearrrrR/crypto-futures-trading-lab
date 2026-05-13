@@ -672,7 +672,11 @@ async function loadCandles(coin) {
     chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
     chgEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
     document.getElementById('chart-title').textContent = coin.toUpperCase() + ' / USDT \u00b7 1H';
-    _chart.timeScale().fitContent();
+    // put latest candle at ~75% from left (75 bars history + 25 bars empty on right)
+    const total = candles.length;
+    requestAnimationFrame(() => {
+      _chart.timeScale().setVisibleLogicalRange({ from: total - 75, to: total + 25 });
+    });
   } catch(e) { console.error('candle error', e); }
 }
 
