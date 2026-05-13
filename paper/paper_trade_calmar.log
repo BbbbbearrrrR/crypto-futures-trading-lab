@@ -1,0 +1,12 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/home/bear/CODE/PROJ/crypto-martingale-backtest/paper/paper_trade.py", line 43, in <module>
+    import backtest_calmar as bc   # reuse prepare(), compute_metrics(), _apply_params()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'backtest_calmar'
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/home/bear/CODE/PROJ/crypto-martingale-backtest/paper/paper_trade.py", line 43, in <module>
+    import backtest_calmar as bc   # reuse prepare(), compute_metrics(), _apply_params()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'backtest_calmar'

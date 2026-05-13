@@ -33,8 +33,8 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+if str(_ROOT / "backtest") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "backtest"))
 
 import ccxt
 import pandas as pd
@@ -49,8 +49,8 @@ WARMUP_1H         = 300        # 1h bars fetched for indicator warmup
 WARMUP_1D         = 500        # 1d bars fetched for EMA warmup
 SLEEP_BUFFER_SEC  = 15         # seconds to wait after candle close before processing
 
-STATE_FILE       = _HERE / "paper_state.json"
-TRADE_LOG_FILE   = _HERE / "paper_trades.csv"
+STATE_FILE       = _HERE / "paper_state_calmar.json"
+TRADE_LOG_FILE   = _HERE / "paper_trades_calmar.csv"
 BEST_PARAMS_FILE = _ROOT / "results/calmar/best_params.json"
 
 API_KEY    = os.getenv("BINANCE_API_KEY", "")
@@ -438,8 +438,8 @@ def main():
     print("║   PAPER TRADING ENGINE — Calmar-Optimised Breakout        ║")
     print(f"║   Testnet : {str(USE_TESTNET):<49}║")
     print(f"║   Capital : ${INITIAL_CAPITAL:,.0f} / coin{' '*(44 - len(f'{INITIAL_CAPITAL:,.0f}'))}║")
-    print(f"║   State   : {str(STATE_FILE):<49}║")
-    print(f"║   Trades  : {str(TRADE_LOG_FILE):<49}║")
+    print(f"║   State   : {str(STATE_FILE.name):<49}║")
+    print(f"║   Trades  : {str(TRADE_LOG_FILE.name):<49}║")
     print("╚═══════════════════════════════════════════════════════════╝\n")
 
     if not BEST_PARAMS_FILE.exists():
