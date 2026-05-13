@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Logo.png" alt="Crypto Futures Trading Lab" width="100" style="background:#0d1117;border-radius:16px;padding:12px" />
+</p>
+
 # Crypto Futures Trading Lab
 
 Systematic crypto futures research workspace for **BTC / ETH / SOL / HYPE** (Binance USD-M perpetuals),  
