@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""
+Paper Trading Dashboard — Flask backend
+Reads state JSON + trades CSV directly from the paper/ directory.
+"""
+import json
+import logging
+import os
+import re
+from pathlib import Path
+from datetime import datetime, timezone
+
+from flask import Flask, jsonify, send_from_directory
+
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+app = Flask(__name__, static_folder="static", static_url_path="")
+
+_ROOT = Path(__file__).resolve().parent.parent
+_PAPER = _ROOT / "paper"
+_LOGS  = _ROOT / "logs"
+
+STRATEGIES = ["breakout", "calmar", "martingale", "regime"]
+COINS      = ["btc", "eth", "sol", "hype"]
+
+
+def _load_state(strategy: str) -> dict:
+    path = _PAPER / f"paper_state_{strategy}.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def _load_trades(strategy: str) -> list:
+    path = _PAPER / f"paper_trades_{strategy}.csv"
+    rows = []
+    if path.exists():
+        lines = path.read_text().strip().splitlines()
+        if len(lines) >= 2:
+            headers = lines[0].split(",")
+            for line in lines[1:]:
+                vals = line.split(",")
+                rows.append(dict(zip(headers, vals)))
+
+    # Also merge trades stored inside state (covers partial closes not yet in CSV)
+    state = _load_state(strategy)
+    existing_ts = {r.get("timestamp") for r in rows}
+    for coin in COINS:
+        for t in state.get(coin, {}).get("trades", []):
+            rec = {k: str(v) for k, v in t.items()}
+            if rec.get("timestamp") not in existing_ts:
+                rows.append(rec)
+
+    # Sort newest first by timestamp string (ISO format sorts lexicographically)
+    rows.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return rows
+
+
+def _parse_log_tail(strategy: str, n_lines: int = 80) -> dict:
+    """Extract last cycle info from log file."""
+    path = _LOGS / f"paper_{strategy}.log"
+    if not path.exists():
+        return {"last_cycle": None, "next_cycle_in": None, "signals": []}
+
+    text = path.read_text(errors="replace")
+    lines = text.splitlines()
+    # last N lines for parsing
+    tail = lines[-n_lines:]
+
+    last_cycle = None
+    next_cycle_in = None
+    signals = []
+
+    for line in tail:
+        m = re.search(r"CYCLE\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC)", line)
+        if m:
+            last_cycle = m.group(1)
+            signals = []  # reset for new cycle
+
+        m = re.search(r"\[(\w+)\]\s+close=([\d.]+)\s+(.+)", line)
+        if m:
+            signals.append({
+                "coin": m.group(1).lower(),
+                "close": float(m.group(2)),
+                "detail": m.group(3).strip(),
+            })
+
+        m = re.search(r"Next cycle in ([\d.]+) min\s+\((.+?)\)", line)
+        if m:
+            next_cycle_in = {"minutes": float(m.group(1)), "at": m.group(2)}
+
+    return {
+        "last_cycle": last_cycle,
+        "next_cycle_in": next_cycle_in,
+        "signals": signals,
+    }
+
+
+@app.route("/api/summary")
+def api_summary():
+    result = {}
+    for strat in STRATEGIES:
+        state = _load_state(strat)
+        coins_data = {}
+        total_capital = 0.0
+        total_initial = 0.0
+        open_positions = 0
+
+        for coin in COINS:
+            cs = state.get(coin, {})
+            cap = cs.get("capital", 10000.0)
+            peak = cs.get("peak_cap", 10000.0)
+            in_trade = cs.get("in_trade", False)
+            direction = cs.get("direction")
+            entry = cs.get("entry_price", 0.0)
+            sl = cs.get("sl_price", 0.0)
+            tp = cs.get("tp_price", 0.0)
+            trades_list = cs.get("trades", [])
+
+            total_capital += cap
+            total_initial += 10000.0
+            if in_trade:
+                open_positions += 1
+
+            wins = sum(1 for t in trades_list if t.get("pnl", 0) > 0)
+            total_trades = len(trades_list)
+            wr = (wins / total_trades * 100) if total_trades > 0 else None
+
+            coins_data[coin] = {
+                "capital": round(cap, 2),
+                "return_pct": round((cap - 10000.0) / 10000.0 * 100, 2),
+                "peak_cap": round(peak, 2),
+                "in_trade": in_trade,
+                "direction": direction,
+                "entry_price": entry,
+                "sl_price": sl,
+                "tp_price": tp,
+                "total_trades": total_trades,
+                "win_rate": round(wr, 1) if wr is not None else None,
+            }
+
+        log_info = _parse_log_tail(strat)
+
+        # Compute unrealized PnL using latest close from log signals
+        close_map = {s["coin"]: s["close"] for s in log_info["signals"]}
+        for coin in COINS:
+            cs = state.get(coin, {})
+            if cs.get("in_trade") and cs.get("entry_price") and coin in close_map:
+                entry   = cs["entry_price"]
+                notional = cs.get("notional", 0.0)
+                cur     = close_map[coin]
+                direction = cs.get("direction")
+                if entry > 0 and notional > 0:
+                    price_chg = (cur - entry) / entry
+                    upnl = notional * price_chg * (1 if direction == "long" else -1)
+                    coins_data[coin]["current_price"] = cur
+                    coins_data[coin]["unrealized_pnl"] = round(upnl, 2)
+                    coins_data[coin]["unrealized_pct"] = round(upnl / 10000.0 * 100, 2)
+
+        result[strat] = {
+            "total_capital": round(total_capital, 2),
+            "total_return_pct": round((total_capital - total_initial) / total_initial * 100, 2),
+            "open_positions": open_positions,
+            "coins": coins_data,
+            "last_cycle": log_info["last_cycle"],
+            "next_cycle_in": log_info["next_cycle_in"],
+            "signals": log_info["signals"],
+        }
+
+    return jsonify(result)
+
+
+@app.route("/api/trades/<strategy>")
+def api_trades(strategy: str):
+    if strategy not in STRATEGIES:
+        return jsonify({"error": "unknown strategy"}), 404
+    trades = _load_trades(strategy)
+    return jsonify(trades)
+
+
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5050, debug=False)

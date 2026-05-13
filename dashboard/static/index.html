@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Paper Trading Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; font-weight: 600; color: var(--blue); }
+  #refresh-info { color: var(--muted); font-size: 12px; }
+  #last-updated { color: var(--text); }
+
+  main { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* ── Strategy cards ── */
+  .strategy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+
+  .strategy-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .strategy-card.has-position { border-color: var(--yellow); }
+
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .strategy-name { font-weight: 700; font-size: 15px; text-transform: capitalize; }
+  .card-meta { display: flex; gap: 12px; align-items: center; }
+  .total-cap { font-size: 18px; font-weight: 700; }
+  .total-ret { font-size: 13px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .pos { color: var(--green); background: rgba(63,185,80,.12); }
+  .neg { color: var(--red); background: rgba(248,81,73,.12); }
+  .zero { color: var(--muted); background: rgba(125,133,144,.1); }
+
+  .card-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* coin rows */
+  .coin-table { width: 100%; border-collapse: collapse; }
+  .coin-table th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 4px 6px; text-align: right; }
+  .coin-table th:first-child { text-align: left; }
+  .coin-table td { padding: 5px 6px; text-align: right; border-top: 1px solid var(--border); }
+  .coin-table td:first-child { text-align: left; font-weight: 600; }
+  .coin-name { display: flex; align-items: center; gap: 6px; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 700; text-transform: uppercase; }
+  .badge-long  { background: rgba(63,185,80,.2); color: var(--green); }
+  .badge-short { background: rgba(248,81,73,.2); color: var(--red); }
+  .badge-flat  { background: rgba(125,133,144,.15); color: var(--muted); }
+
+  /* cycle info */
+  .cycle-info { display: flex; gap: 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .cycle-info span { display: flex; gap: 4px; }
+  .cycle-info b { color: var(--text); }
+
+  /* signals */
+  .signals-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sig-chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(88,166,255,.1); color: var(--blue); border: 1px solid rgba(88,166,255,.2); }
+
+  /* ── Trades panel ── */
+  .trades-section h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .strategy-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab { padding: 5px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; transition: all .15s; }
+  .tab:hover { border-color: var(--blue); color: var(--blue); }
+  .tab.active { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+
+  .trades-table-wrap { overflow-x: auto; }
+  table.trades { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.trades th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  table.trades td { padding: 6px 10px; border-bottom: 1px solid rgba(48,54,61,.6); white-space: nowrap; }
+  table.trades tr:hover td { background: rgba(255,255,255,.03); }
+  .pnl-pos { color: var(--green); font-weight: 600; }
+  .pnl-neg { color: var(--red); font-weight: 600; }
+  .empty-msg { color: var(--muted); padding: 20px 0; text-align: center; }
+
+  /* responsive */
+  @media (max-width: 600px) {
+    .strategy-grid { grid-template-columns: 1fr; }
+    header { flex-direction: column; gap: 8px; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📊 Paper Trading Dashboard</h1>
+  <div id="refresh-info">自动刷新 30s · 上次更新：<span id="last-updated">—</span></div>
+</header>
+
+<main>
+  <div class="strategy-grid" id="strategy-grid">
+    <div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1">加载中…</div>
+  </div>
+
+  <div class="trades-section">
+    <h2>成交记录</h2>
+    <div class="strategy-tabs" id="trade-tabs"></div>
+    <div class="trades-table-wrap" id="trades-body">
+      <p class="empty-msg">选择上方策略查看成交记录</p>
+    </div>
+  </div>
+</main>
+
+<script>
+const STRATEGIES = ["breakout", "calmar", "martingale", "regime"];
+const COINS      = ["btc", "eth", "sol", "hype"];
+const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa" };
+
+let activeTab = "breakout";
+let summaryCache = {};
+
+/* ── helpers ── */
+function retClass(v) {
+  if (v > 0) return "pos";
+  if (v < 0) return "neg";
+  return "zero";
+}
+function retStr(v) {
+  return (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+}
+function fmtCap(v) {
+  return "$" + v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtPnl(v) {
+  const n = parseFloat(v);
+  if (isNaN(n)) return v;
+  const cls = n >= 0 ? "pnl-pos" : "pnl-neg";
+  const s   = (n >= 0 ? "+" : "") + n.toFixed(2);
+  return `<span class="${cls}">${s}</span>`;
+}
+function dirBadge(d) {
+  if (!d) return `<span class="badge badge-flat">flat</span>`;
+  if (d === "long")  return `<span class="badge badge-long">long</span>`;
+  return `<span class="badge badge-short">short</span>`;
+}
+
+/* ── Summary render ── */
+function renderSummary(data) {
+  const grid = document.getElementById("strategy-grid");
+  grid.innerHTML = "";
+
+  STRATEGIES.forEach(strat => {
+    const s = data[strat];
+    if (!s) return;
+
+    const hasPos = s.open_positions > 0;
+    const retCls = retClass(s.total_return_pct);
+
+    const coinRows = COINS.map(coin => {
+      const c = s.coins[coin] || {};
+      const ret = c.return_pct ?? 0;
+      const upnl = c.unrealized_pnl;
+      const upnlHtml = upnl != null
+        ? `<span class="${upnl >= 0 ? 'pos' : 'neg'}">${upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}</span><br><span style="font-size:11px;color:var(--muted)">${c.unrealized_pct >= 0 ? '+' : ''}${c.unrealized_pct}%</span>`
+        : `<span style="color:var(--muted)">—</span>`;
+      return `<tr>
+        <td><span class="coin-name">
+          <span style="color:${COIN_COLORS[coin]};font-size:12px">●</span>
+          ${coin.toUpperCase()}
+          ${dirBadge(c.direction)}
+        </span></td>
+        <td>${fmtCap(c.capital ?? 10000)}</td>
+        <td class="${retClass(ret)}">${retStr(ret)}</td>
+        <td>${upnlHtml}</td>
+        <td>${c.total_trades ?? 0}</td>
+        <td>${c.win_rate != null ? c.win_rate + "%" : "—"}</td>
+        <td style="color:var(--muted);font-size:12px">${c.entry_price ? c.entry_price.toLocaleString() : "—"}</td>
+      </tr>`;
+    }).join("");
+
+    const signalHtml = s.signals.length
+      ? `<div class="signals-row">${s.signals.map(sig =>
+          `<span class="sig-chip">${sig.coin.toUpperCase()} ${sig.close.toLocaleString()} ${sig.detail}</span>`
+        ).join("")}</div>`
+      : "";
+
+    const nextMin = s.next_cycle_in?.minutes;
+    const nextAt  = s.next_cycle_in?.at;
+
+    const card = document.createElement("div");
+    card.className = "strategy-card" + (hasPos ? " has-position" : "");
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="strategy-name">${strat}</span>
+        <div class="card-meta">
+          <span class="total-cap">${fmtCap(s.total_capital)}</span>
+          <span class="total-ret ${retCls}">${retStr(s.total_return_pct)}</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <table class="coin-table">
+          <thead><tr>
+            <th>币种</th><th>资金</th><th>收益</th><th>未实现</th><th>笔数</th><th>胜率</th><th>入场价</th>
+          </tr></thead>
+          <tbody>${coinRows}</tbody>
+        </table>
+        <div class="cycle-info">
+          <span>上次周期 <b>${s.last_cycle ?? "—"}</b></span>
+          ${nextMin != null ? `<span>下次 <b>${nextMin.toFixed(1)} min</b> (${nextAt})</span>` : ""}
+          <span>持仓 <b>${s.open_positions}</b></span>
+        </div>
+        ${signalHtml}
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+/* ── Trades render ── */
+async function loadTrades(strategy) {
+  const body = document.getElementById("trades-body");
+  body.innerHTML = `<p class="empty-msg">加载中…</p>`;
+  const res = await fetch(`/api/trades/${strategy}`);
+  const rows = await res.json();
+  if (!rows.length) {
+    body.innerHTML = `<p class="empty-msg">暂无成交记录</p>`;
+    return;
+  }
+  const headers = Object.keys(rows[0]);
+  body.innerHTML = `
+    <table class="trades">
+      <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${headers.map(h => {
+        if (h === "pnl_usdt") return `<td>${fmtPnl(r[h])}</td>`;
+        return `<td>${r[h] ?? "—"}</td>`;
+      }).join("")}</tr>`).join("")}</tbody>
+    </table>`;
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("trade-tabs");
+  tabs.innerHTML = STRATEGIES.map(s =>
+    `<button class="tab ${s === activeTab ? 'active' : ''}" data-s="${s}">${s}</button>`
+  ).join("");
+  tabs.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeTab = btn.dataset.s;
+      renderTabs();
+      loadTrades(activeTab);
+    });
+  });
+}
+
+/* ── Main loop ── */
+async function refresh() {
+  try {
+    const res = await fetch("/api/summary");
+    summaryCache = await res.json();
+    renderSummary(summaryCache);
+    document.getElementById("last-updated").textContent =
+      new Date().toLocaleTimeString("zh");
+  } catch(e) {
+    console.error("fetch error", e);
+  }
+}
+
+renderTabs();
+loadTrades(activeTab);
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

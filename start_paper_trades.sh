@@ -3,6 +3,13 @@ set -e
 
 PYTHON=/home/bear/Softwares/anaconda3/envs/crypto/bin/python
 
+# --reset: wipe all state + trades before starting
+if [[ "$1" == "--reset" ]]; then
+  echo "Resetting all paper trading state and trade records..."
+  rm -f paper/paper_state_*.json paper/paper_trades_*.csv
+  echo "Reset complete."
+fi
+
 mkdir -p logs
 
 "$PYTHON" -u paper/paper_trade_breakout.py > logs/paper_breakout.log 2>&1 &
@@ -18,3 +25,7 @@ echo "martingale PID: $!"
 echo "regime PID: $!"
 
 echo "All four paper trades started. Check logs/ for output."
+
+# ── Dashboard ──────────────────────────────────────────────────────────────────
+"$PYTHON" dashboard/app.py > logs/dashboard.log 2>&1 &
+echo "dashboard PID: $!  →  http://localhost:5050"
