@@ -1,8 +1,8 @@
 {
   "btc": {
-    "best_score": 3.409,
+    "best_score": 4.6116,
     "params": {
-      "LEVERAGE": 5,
+      "LEVERAGE": 10,
       "BASE_RISK": 0.01,
       "BB_PERIOD": 40,
       "BB_STD": 2.0,
