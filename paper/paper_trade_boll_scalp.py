@@ -410,6 +410,29 @@ def check_intrabar_sl(ex, state: dict, best: dict):
                       f"  tp1={tp1:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
                 changed = True
 
+            # Check TP2 (final TP)
+            tp2    = cs["tp2_price"]
+            hit_tp2 = (f_high >= tp2 if d == "long" else f_low <= tp2)
+            if hit_tp2:
+                pct = (tp2 - ep) / ep if d == "long" else (ep - tp2) / ep
+                pnl = max(nt_rem * pct - nt_rem * bs.FEE_RATE * 2, -cap)
+                cap += pnl
+                ts_now = datetime.now(timezone.utc)
+                rec = dict(timestamp=str(ts_now), coin=coin, direction=d,
+                           entry_price=ep, exit_price=round(tp2, 6),
+                           notional=round(nt_rem, 4), exit_reason="TP2",
+                           pnl_usdt=round(pnl, 4), capital=round(cap, 4))
+                cs["trades"].append(rec)
+                _log_trade(rec)
+                print(f"  ⚡ INTRABAR TP2  {coin.upper():5s}  {d.upper()}"
+                      f"  tp2={tp2:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
+                cs["capital"]  = cap
+                cs["peak_cap"] = max(cs["peak_cap"], cap)
+                cs.update({"in_trade": False, "partial_done": False,
+                           "bars_held": 0, "open_time": None})
+                changed = True
+                continue
+
             # Check SL
             hit_sl = (f_low <= sp if d == "long" else f_high >= sp)
             if not hit_sl:

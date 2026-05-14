@@ -356,7 +356,7 @@ def run_cycle(ex, state: dict, best: dict):
 INTRABAR_CHECK_INTERVAL = 60  # seconds between live SL checks
 
 def check_intrabar_sl(ex, state: dict, best: dict):
-    """Check live price vs hard SL for all open martingale positions between candles."""
+    """Check live price vs hard SL and TP for all open martingale positions between candles."""
     changed = False
     for symbol, coin in COINS:
         cs = state[coin]
@@ -364,35 +364,59 @@ def check_intrabar_sl(ex, state: dict, best: dict):
         if not martin_d:
             continue
         try:
-            raw     = _ex_pub.fetch_ohlcv(symbol, "1h", limit=1)
-            f_high  = float(raw[-1][2])
-            f_low   = float(raw[-1][3])
+            try:
+                raw    = _ex_pub.fetch_ohlcv(symbol, "1h", limit=1)
+                f_high = float(raw[-1][2])
+                f_low  = float(raw[-1][3])
+            except Exception:
+                tk     = _ex_pub.fetch_ticker(symbol)
+                f_high = float(tk["high"] or tk["last"])
+                f_low  = float(tk["low"]  or tk["last"])
             martin  = _dict_to_martin(martin_d)
             hard_sl = martin.hard_sl()
+            tp_price = martin.tp()
             cap     = cs["capital"]
+            params  = best.get(coin, {}).get("params", {})
 
-            hit_sl = (f_low <= hard_sl if martin.direction == "long" else f_high >= hard_sl)
-            if not hit_sl:
-                continue
+            hit_tp = (f_high >= tp_price if martin.direction == "long" else f_low  <= tp_price)
+            hit_sl = (f_low  <= hard_sl  if martin.direction == "long" else f_high >= hard_sl)
 
-            pnl      = martin.pnl(hard_sl)
-            pnl      = max(pnl, -cap)
-            cap     += pnl
-            ts_now   = datetime.now(timezone.utc)
-
-            rec = dict(timestamp=str(ts_now), coin=coin, direction=martin.direction,
-                       level=martin.level, profit_level=martin.profit_level,
-                       exit_reason="MAX_SL", notional=round(martin.notional, 4),
-                       pnl_usdt=round(pnl, 4), capital=round(cap, 4))
-            cs["trades"].append(rec)
-            _log_trade(rec)
-            print(f"  \u26a1 INTRABAR MAX_SL  {coin.upper():5s}  {martin.direction.upper()}"
-                  f"  high={f_high:.4f}  low={f_low:.4f}  sl={hard_sl:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
-
-            cs["capital"]  = cap
-            cs["peak_cap"] = max(cs["peak_cap"], cap)
-            cs["martin"]   = None
-            changed = True
+            if hit_tp and not hit_sl:
+                partial_pnl = martin.partial_close(tp_price)
+                partial_pnl = max(partial_pnl, -cap)
+                cap        += partial_pnl
+                is_last     = (martin.tp_tier >= params.get("TP_SCALE_LEVELS", 1))
+                reason      = "TP" if is_last else f"TP{martin.tp_tier}"
+                ts_now      = datetime.now(timezone.utc)
+                rec = dict(timestamp=str(ts_now), coin=coin, direction=martin.direction,
+                           level=martin.level, profit_level=martin.profit_level,
+                           exit_reason=reason, notional=round(martin.notional, 4),
+                           pnl_usdt=round(partial_pnl, 4), capital=round(cap, 4))
+                cs["trades"].append(rec)
+                _log_trade(rec)
+                print(f"  \u26a1 INTRABAR {reason:6s}  {coin.upper():5s}  {martin.direction.upper()}"
+                      f"  tp={tp_price:.4f}  pnl=${partial_pnl:+.2f}  cap=${cap:.0f}")
+                cs["capital"]  = cap
+                cs["peak_cap"] = max(cs["peak_cap"], cap)
+                cs["martin"]   = None if is_last else _martin_to_dict(martin)
+                changed = True
+            elif hit_sl:
+                pnl      = martin.pnl(hard_sl)
+                pnl      = max(pnl, -cap)
+                cap     += pnl
+                ts_now   = datetime.now(timezone.utc)
+                rec = dict(timestamp=str(ts_now), coin=coin, direction=martin.direction,
+                           level=martin.level, profit_level=martin.profit_level,
+                           exit_reason="MAX_SL", notional=round(martin.notional, 4),
+                           pnl_usdt=round(pnl, 4), capital=round(cap, 4))
+                cs["trades"].append(rec)
+                _log_trade(rec)
+                print(f"  \u26a1 INTRABAR MAX_SL  {coin.upper():5s}  {martin.direction.upper()}"
+                      f"  high={f_high:.4f}  low={f_low:.4f}  sl={hard_sl:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
+                cs["capital"]  = cap
+                cs["peak_cap"] = max(cs["peak_cap"], cap)
+                cs["martin"]   = None
+                changed = True
         except Exception as e:
             print(f"  [{coin.upper()}] intrabar check error: {e}")
     if changed:
