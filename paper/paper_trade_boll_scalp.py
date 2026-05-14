@@ -154,6 +154,10 @@ def process_bar(cs: dict, row: pd.Series, params: dict, coin: str, ts) -> list:
                    (row["high"] >= tp1 if d == "long" else row["low"] <= tp1))
         hit_tp2 = (row["high"] >= tp2 if d == "long" else row["low"] <= tp2)
         hit_sl  = (row["low"]  <= sp  if d == "long" else row["high"] >= sp)
+        hit_vol_div = (
+            (d == "long"  and bool(row.get("vol_div_long",  False))) or
+            (d == "short" and bool(row.get("vol_div_short", False)))
+        )
         expired = cs["bars_held"] >= max_hold
 
         # Partial TP1 — close 50%
@@ -178,12 +182,14 @@ def process_bar(cs: dict, row: pd.Series, params: dict, coin: str, ts) -> list:
             print(f"    ½ TP1    {d.upper():5s}  exit={tp1:.4f}"
                   f"  pnl=${pnl:+.2f}  cap=${cap:.0f}  @{str(ts)[:16]}")
 
-        # Full exit: TP2, SL, or timeout
-        if cs["in_trade"] and (hit_tp2 or hit_sl or expired):
+        # Full exit: TP2, SL, vol-div early TP, or timeout
+        if cs["in_trade"] and (hit_tp2 or hit_sl or hit_vol_div or expired):
             if hit_tp2:
                 xp, reason = tp2, "TP2"
             elif hit_sl:
                 xp, reason = sp, "SL"
+            elif hit_vol_div:
+                xp, reason = float(row["close"]), "VOL_DIV"
             else:
                 xp, reason = float(row["close"]), "TIMEOUT"
 

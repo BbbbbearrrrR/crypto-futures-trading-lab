@@ -42,7 +42,7 @@
     }
   },
   "hype": {
-    "best_score": 11.6942,
+    "best_score": 12.8873,
     "params": {
       "LEVERAGE": 5,
       "BASE_RISK": 0.02,
@@ -51,8 +51,9 @@
       "ATR_PERIOD": 14,
       "SL_TP_RATIO": 1.0,
       "TREND_EMA_PERIOD": 100,
-      "USE_PARTIAL_TP": true,
-      "MAX_HOLD_BARS": 96
+      "USE_PARTIAL_TP": false,
+      "MAX_HOLD_BARS": 24,
+      "VOL_DIV_PERIOD": 5
     }
   },
   "sui": {

@@ -50,6 +50,7 @@ TREND_EMA_PERIOD = 200     # 5m EMA for trend direction filter
 
 USE_PARTIAL_TP  = True     # True: TP1=bb_mid(50%) + TP2=opp band(50%); False: TP=bb_mid(full)
 MAX_HOLD_BARS   = 48       # max bars to hold before forced exit (48 × 5m = 4h)
+VOL_DIV_PERIOD  = 3        # bars to look back for volume-price divergence TP
 
 # ── Auto-tuning ───────────────────────────────────────────────────────────────
 AUTO_TUNE = True
@@ -63,6 +64,7 @@ TUNE_SPACE = {
     "TREND_EMA_PERIOD": [50, 100, 200],
     "USE_PARTIAL_TP":   [True, False],
     "MAX_HOLD_BARS":    [24, 48, 96],
+    "VOL_DIV_PERIOD":   [0, 3, 5],   # 0 = disabled
 }
 # Total combinations per coin: 2x2x3x3x5x3x2x3 = 6480
 
@@ -106,6 +108,21 @@ def prepare(df_5m: pd.DataFrame) -> pd.DataFrame:
     prev_close = df["close"].shift(1)
     df["entry_long"]  = (prev_close >= df["bb_lower"]) & (df["close"] < df["bb_lower"])
     df["entry_short"] = (prev_close <= df["bb_upper"]) & (df["close"] > df["bb_upper"])
+
+    # Volume-price divergence: price moving in trade direction but volume shrinking
+    # Used as early TP signal when VOL_DIV_PERIOD > 0
+    if VOL_DIV_PERIOD > 0 and "volume" in df.columns:
+        df["vol_div_long"]  = (
+            (df["close"] > df["close"].shift(VOL_DIV_PERIOD)) &
+            (df["volume"] < df["volume"].shift(VOL_DIV_PERIOD))
+        )  # price up, volume down → long momentum fading
+        df["vol_div_short"] = (
+            (df["close"] < df["close"].shift(VOL_DIV_PERIOD)) &
+            (df["volume"] < df["volume"].shift(VOL_DIV_PERIOD))
+        )  # price down, volume down → short momentum fading
+    else:
+        df["vol_div_long"]  = False
+        df["vol_div_short"] = False
 
     return df
 
@@ -157,6 +174,10 @@ def run_backtest(symbol: str, coin: str):
                        (row["high"] >= tp1_price if direction == "long" else row["low"] <= tp1_price))
             hit_tp2 = (row["high"] >= tp2_price if direction == "long" else row["low"] <= tp2_price)
             hit_sl  = (row["low"]  <= sl_price  if direction == "long" else row["high"] >= sl_price)
+            hit_vol_div = (
+                (direction == "long"  and bool(row["vol_div_long"])) or
+                (direction == "short" and bool(row["vol_div_short"]))
+            )
             expired = bars_held >= MAX_HOLD_BARS
 
             # Partial TP1 — close 50%
@@ -178,12 +199,14 @@ def run_backtest(symbol: str, coin: str):
                 partial_done  = True
                 sl_price      = entry_price  # move SL to breakeven
 
-            # Full exit: TP2, SL, or timeout
-            if in_trade and (hit_tp2 or hit_sl or expired):
+            # Full exit: TP2, SL, vol-div early TP, or timeout
+            if in_trade and (hit_tp2 or hit_sl or hit_vol_div or expired):
                 if hit_tp2:
                     exit_price, exit_reason = tp2_price, "TP2"
                 elif hit_sl:
                     exit_price, exit_reason = sl_price, "SL"
+                elif hit_vol_div:
+                    exit_price, exit_reason = row["close"], "VOL_DIV"
                 else:
                     exit_price, exit_reason = row["close"], "TIMEOUT"
 
@@ -289,6 +312,7 @@ def current_params() -> dict:
         "TREND_EMA_PERIOD": TREND_EMA_PERIOD,
         "USE_PARTIAL_TP": USE_PARTIAL_TP,
         "MAX_HOLD_BARS": MAX_HOLD_BARS,
+        "VOL_DIV_PERIOD": VOL_DIV_PERIOD,
     }
 
 
