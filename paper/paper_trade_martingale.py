@@ -75,7 +75,7 @@ _ex_pub = ccxt.binanceusdm({"enableRateLimit": True})
 
 
 def fetch_ohlcv(ex, symbol: str, tf: str, limit: int) -> pd.DataFrame:
-    raw = ex.fetch_ohlcv(symbol, tf, limit=limit + 1)
+    raw = _ex_pub.fetch_ohlcv(symbol, tf, limit=limit + 1)
     df  = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
     df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
     df.index.name = "datetime"
