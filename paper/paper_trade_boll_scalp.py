@@ -467,8 +467,6 @@ def main():
     state = load_state()
     ex    = make_exchange()
 
-    run_cycle(ex, state, best)
-
     while True:
         wait = seconds_to_next_candle()
         nxt  = (datetime.now(timezone.utc) + timedelta(seconds=wait)).strftime("%H:%M:%S UTC")
