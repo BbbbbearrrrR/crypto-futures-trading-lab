@@ -342,39 +342,50 @@ def run_cycle(ex, state: dict, best: dict):
 INTRABAR_CHECK_INTERVAL = 60  # seconds between live SL checks
 
 def check_intrabar_sl(ex, state: dict, best: dict):
-    """Check live price vs SL for all open positions between candle cycles."""
+    """Check live price vs SL/TP for all open positions between candle cycles."""
     changed = False
     for symbol, coin in COINS:
         cs = state[coin]
         if not cs.get("in_trade"):
             continue
         try:
-            raw    = _ex_pub.fetch_ohlcv(symbol, "1h", limit=1)
-            f_high = float(raw[-1][2])
-            f_low  = float(raw[-1][3])
+            try:
+                raw    = _ex_pub.fetch_ohlcv(symbol, "1h", limit=1)
+                f_high = float(raw[-1][2])
+                f_low  = float(raw[-1][3])
+            except Exception:
+                tk     = _ex_pub.fetch_ticker(symbol)
+                f_high = float(tk["high"] or tk["last"])
+                f_low  = float(tk["low"]  or tk["last"])
             d      = cs["direction"]
             sp     = cs["sl_price"]
+            tp     = cs["tp_price"]
             ep     = cs["entry_price"]
             nt     = cs["notional"]
             cap    = cs["capital"]
 
-            hit_sl = (f_low <= sp if d == "long" else f_high >= sp)
-            if not hit_sl:
+            hit_tp = (f_high >= tp if d == "long" else f_low  <= tp)
+            hit_sl = (f_low  <= sp if d == "long" else f_high >= sp)
+            if not hit_tp and not hit_sl:
                 continue
 
-            pct = (sp - ep) / ep if d == "long" else (ep - sp) / ep
+            # SL takes priority (worst case) when both hit in same bar
+            xp     = tp if (hit_tp and not hit_sl) else sp
+            reason = "TP" if (hit_tp and not hit_sl) else "SL"
+            pct = (xp - ep) / ep if d == "long" else (ep - xp) / ep
             pnl = max(nt * pct - nt * bb.FEE_RATE * 2, -cap)
             cap += pnl
             ts_now = datetime.now(timezone.utc)
 
             rec = dict(timestamp=str(ts_now), coin=coin, direction=d,
-                       entry_price=ep, exit_price=round(sp, 6),
-                       notional=round(nt, 4), exit_reason="SL",
+                       entry_price=ep, exit_price=round(xp, 6),
+                       notional=round(nt, 4), exit_reason=reason,
                        pnl_usdt=round(pnl, 4), capital=round(cap, 4))
             cs["trades"].append(rec)
             _log_trade(rec)
-            print(f"  \u26a1 INTRABAR SL  {coin.upper():5s}  {d.upper()}"
-                  f"  high={f_high:.4f}  low={f_low:.4f}  sl={sp:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
+            tag = "TP" if reason == "TP" else "SL"
+            print(f"  \u26a1 INTRABAR {tag:2s}  {coin.upper():5s}  {d.upper()}"
+                  f"  high={f_high:.4f}  low={f_low:.4f}  xp={xp:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
 
             cs["capital"]  = cap
             cs["peak_cap"] = max(cs["peak_cap"], cap)
