@@ -90,7 +90,7 @@ def print_summary():
     print("\n" + "=" * width)
 
 
-def run_tune(strategies: list, coin_filter: list | None):
+def run_tune(strategies: list, coin_filter: list | None, n_trials: int = 1000):
     """Run autotune sequentially for each strategy (each uses all cores internally)."""
     # lazy import after env vars are set
     import importlib
@@ -119,7 +119,8 @@ def run_tune(strategies: list, coin_filter: list | None):
         else:
             active = None  # use all
 
-        mod.auto_tune(coins=active)
+        extra = {"n_trials": n_trials} if strat == "martingale" else {}
+        mod.auto_tune(coins=active, **extra)
 
         elapsed = time.time() - t0
         print(f"\n  [{strat.upper()}] done in {elapsed/60:.1f} min")
@@ -142,6 +143,10 @@ def main():
     parser.add_argument(
         "--summary", action="store_true",
         help="Print current best params summary and exit (no tuning)"
+    )
+    parser.add_argument(
+        "--trials", type=int, default=None,
+        help="Number of Optuna trials per coin (martingale only, default: 1000)"
     )
     args = parser.parse_args()
 
@@ -173,7 +178,7 @@ def main():
             sys.exit(1)
         coin_filter = [(s, c) for s, c in _ALL_COIN_PAIRS if c in set(requested_coins)]
 
-    run_tune(strats, coin_filter)
+    run_tune(strats, coin_filter, n_trials=args.trials or 1000)
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _PAPER = _ROOT / "paper"
 _LOGS  = _ROOT / "logs"
 
-STRATEGIES = ["breakout", "calmar", "regime"]
+STRATEGIES = ["breakout", "calmar", "regime", "martingale"]
 COINS      = ["btc", "eth", "sol", "hype", "sui"]
 
 COIN_SYMBOLS = {
@@ -69,7 +69,7 @@ def _load_trades(strategy: str) -> list:
     return rows
 
 
-def _parse_log_tail(strategy: str, n_lines: int = 80) -> dict:
+def _parse_log_tail(strategy: str, n_lines: int = 300) -> dict:
     """Extract last cycle info from log file."""
     path = _LOGS / f"paper_{strategy}.log"
     if not path.exists():
@@ -135,13 +135,30 @@ def api_summary():
             cs = state.get(coin, {})
             cap = cs.get("capital", 10000.0)
             peak = cs.get("peak_cap", 10000.0)
-            in_trade = cs.get("in_trade", False)
-            direction = cs.get("direction")
-            entry = cs.get("entry_price", 0.0)
-            sl = cs.get("sl_price", 0.0)
-            tp = cs.get("tp_price", 0.0)
-            notional = cs.get("notional", 0.0)
             trades_list = cs.get("trades", [])
+
+            # Martingale uses a nested 'martin' object instead of flat fields
+            martin_obj = cs.get("martin")
+            if martin_obj is not None:
+                in_trade  = True
+                direction = martin_obj.get("direction")
+                entries   = martin_obj.get("entries", [])
+                entry     = entries[0][0] if entries else 0.0
+                notional  = martin_obj.get("notional", 0.0)
+                sl        = 0.0
+                tp        = 0.0
+            elif "martin" in cs:
+                # key exists but is null → flat, no position
+                in_trade  = False
+                direction = None
+                entry = sl = tp = notional = 0.0
+            else:
+                in_trade  = cs.get("in_trade", False)
+                direction = cs.get("direction")
+                entry     = cs.get("entry_price", 0.0)
+                sl        = cs.get("sl_price", 0.0)
+                tp        = cs.get("tp_price", 0.0)
+                notional  = cs.get("notional", 0.0)
 
             total_capital += cap
             total_initial += 10000.0

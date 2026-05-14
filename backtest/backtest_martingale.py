@@ -64,19 +64,19 @@ TREND_EMA_PERIOD = 20           # 1d EMA for trend filter
 AUTO_TUNE = True               # True = grid search; False = single run with above params
 
 TUNE_SPACE = {
-    "LEVERAGE":           [50],
-    "BASE_RISK":          [0.025, 0.05],
-    "MAX_LEVELS":         [10],
-    "MAX_PYRAMID_LEVELS": [10],
-    "PYRAMID_MIN_PROFIT_RATE": [0.0, 0.5, 1.0],
-    "GRID_STEP_RATE":     [0.02, 0.05],
-    "TP_MARGIN_RATE":     [0.50, 1.00, 3.00],
-    "TP_SCALE_LEVELS":    [1, 3],
-    "TP_SCALE_MULT":      [2.0],
-    "SL_CAPITAL_RATE":    [0.20, 0.50],
-    "BOLL_PERIOD":        [14, 20],
-    "BOLL_STD":           [1.5, 2.0, 2.5],
-    "TREND_EMA_PERIOD":   [10, 20, 30],
+    "LEVERAGE":           [20, 30, 50],
+    "BASE_RISK":          [0.01, 0.025, 0.05],
+    "MAX_LEVELS":         [5, 8, 10, 15],
+    "MAX_PYRAMID_LEVELS": [0, 5, 10],
+    "PYRAMID_MIN_PROFIT_RATE": [0.0, 0.5, 1.0, 2.0],
+    "GRID_STEP_RATE":     [0.03, 0.05, 0.08],
+    "TP_MARGIN_RATE":     [0.30, 0.50, 1.00, 2.00, 3.00],
+    "TP_SCALE_LEVELS":    [1, 2, 3],
+    "TP_SCALE_MULT":      [1.5, 2.0, 3.0],
+    "SL_CAPITAL_RATE":    [0.25, 0.50, 0.75],
+    "BOLL_PERIOD":        [10, 14, 20, 30],
+    "BOLL_STD":           [1.0, 1.5, 2.0, 2.5, 3.0],
+    "TREND_EMA_PERIOD":   [10, 20, 30, 50],
 }
 
 
@@ -524,53 +524,89 @@ def _save_best_results_table():
     print(f"Best results table saved to {out_file}")
 
 
-def auto_tune(coins=None):
-    import itertools
+def _tune_worker_coin(args: tuple):
+    """Worker: run backtest for a single (symbol, coin) with given params."""
+    symbol, coin, params = args
+    _apply_params(params)
+    result = _run_silent(symbol, coin)
+    if result is None:
+        return float("-inf"), 0.0, current_params()
+    _, ret, hold_ratio, _ = result
+    return ret, hold_ratio, current_params()
+
+
+def auto_tune(coins=None, n_trials: int = 1000):
+    import optuna
     import multiprocessing as mp
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
     active_coins = coins if coins is not None else COINS
-    keys   = list(TUNE_SPACE.keys())
-    values = list(TUNE_SPACE.values())
-    combos = [{**dict(zip(keys, c)), '_coins': active_coins} for c in itertools.product(*values)]
-    total  = len(combos)
     n_workers = min(16, max(1, mp.cpu_count() - 1))
+    BATCH     = n_workers  # evaluate this many trials in parallel per step
+
     print(f"\n{'='*60}")
-    print(f"  AUTO-TUNE  |  {total} combinations  |  {len(active_coins)} coins each")
-    print(f"  Workers    |  {n_workers} parallel processes (spawn)")
+    print(f"  Optuna TPE  |  {n_trials} trials × {len(active_coins)} coins")
+    print(f"  Workers     |  {n_workers} parallel  |  batch {BATCH}")
     print(f"{'='*60}")
 
     best: dict = json.loads(BEST_PARAMS_FILE.read_text()) if BEST_PARAMS_FILE.exists() else {}
 
-    ctx  = mp.get_context("spawn")
-    done = 0
-    pbar = tqdm(total=total, desc="AUTO-TUNE", unit="combo", ncols=90)
-    with ctx.Pool(processes=n_workers, initializer=_worker_init) as pool:
-        for p, avg_ret, coin_returns, coin_hold_ratios, snapped_params in \
-                pool.imap_unordered(_tune_worker, combos, chunksize=1):
-            done += 1
-            pbar.update(1)
+    ctx = mp.get_context("spawn")
 
-            updated = []
-            for coin, ret in coin_returns.items():
-                prev_ret = best.get(coin, {}).get("best_return", float("-inf"))
-                if ret > prev_ret:
-                    best[coin] = {
-                        "best_return": round(ret, 6),
-                        "max_hold_ratio": round(coin_hold_ratios[coin], 6),
-                        "params": snapped_params,
-                    }
-                    updated.append(f"{coin.upper()} {ret*100:.1f}%")
+    for symbol, coin in active_coins:
+        print(f"\n─── {coin.upper()} ───")
+        study = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=42, n_startup_trials=min(100, n_trials // 5)),
+            study_name=f"martin_{coin}",
+        )
 
-            if updated:
-                BEST_PARAMS_FILE.write_text(json.dumps(best, indent=2))
-                pbar.write(f"  [{done:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  ★ {', '.join(updated)}"
-                           f"  | lev={p['LEVERAGE']} risk={p['BASE_RISK']} ml={p['MAX_LEVELS']}"
-                           f" tp={p['TP_MARGIN_RATE']} boll={p['BOLL_PERIOD']}/{p['BOLL_STD']}")
-            elif done % 50 == 0:
-                pbar.write(f"  [{done:>{len(str(total))}}/{total}]  avg {avg_ret*100:.1f}%  (no improvement)")
-    pbar.close()
+        pbar = tqdm(total=n_trials, desc=coin.upper(), unit="trial", ncols=90)
 
-    print(f"\nTuning complete. Best per-coin results in {BEST_PARAMS_FILE}")
+        with ctx.Pool(processes=n_workers, initializer=_worker_init) as pool:
+            done = 0
+            while done < n_trials:
+                batch_n = min(BATCH, n_trials - done)
+
+                # Ask Optuna for the next batch of param suggestions
+                trials = [study.ask() for _ in range(batch_n)]
+                params_batch = [
+                    {k: t.suggest_categorical(k, vs) for k, vs in TUNE_SPACE.items()}
+                    for t in trials
+                ]
+                worker_args = [(symbol, coin, p) for p in params_batch]
+
+                # Evaluate in parallel
+                results = pool.map(_tune_worker_coin, worker_args)
+
+                # Report results back to Optuna and update best
+                for t, (ret, hold_ratio, snapped_p) in zip(trials, results):
+                    study.tell(t, ret)
+
+                    prev_ret = best.get(coin, {}).get("best_return", float("-inf"))
+                    if ret > prev_ret:
+                        best[coin] = {
+                            "best_return": round(ret, 6),
+                            "max_hold_ratio": round(hold_ratio, 6),
+                            "params": snapped_p,
+                        }
+                        BEST_PARAMS_FILE.write_text(json.dumps(best, indent=2))
+                        pbar.write(
+                            f"  [{done+1}/{n_trials}]  ★ {ret*100:.1f}%"
+                            f"  lev={snapped_p.get('LEVERAGE')} risk={snapped_p.get('BASE_RISK')}"
+                            f"  ml={snapped_p.get('MAX_LEVELS')} tp={snapped_p.get('TP_MARGIN_RATE')}"
+                            f"  boll={snapped_p.get('BOLL_PERIOD')}/{snapped_p.get('BOLL_STD')}"
+                        )
+
+                done += batch_n
+                pbar.update(batch_n)
+
+        pbar.close()
+        best_ret = best.get(coin, {}).get("best_return", 0)
+        print(f"  {coin.upper()} best: {best_ret*100:.1f}%")
+
     _save_best_results_table()
+    print(f"\nTuning complete. Best per-coin results in {BEST_PARAMS_FILE}")
 
 
 

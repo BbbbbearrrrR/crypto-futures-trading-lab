@@ -27,13 +27,13 @@
 
   main { padding: 12px 24px; display: flex; flex-direction: column; gap: 12px; }
 
-  /* ── Strategy cards ── */
-  .strategy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 10px; }
+  /* ── Strategy cards: always 2-column grid ── */
+  .strategy-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 
   .strategy-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .strategy-card.has-position { border-color: var(--yellow); }
 
-  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid var(--border); }
   .strategy-name { font-weight: 700; font-size: 15px; text-transform: capitalize; }
   .card-meta { display: flex; gap: 12px; align-items: center; }
   .total-cap { font-size: 18px; font-weight: 700; }
@@ -42,13 +42,13 @@
   .neg { color: var(--red); background: rgba(248,81,73,.12); }
   .zero { color: var(--muted); background: rgba(125,133,144,.1); }
 
-  .card-body { padding: 8px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card-body { padding: 6px 12px; display: flex; flex-direction: column; gap: 6px; }
 
   /* coin rows */
   .coin-table { width: 100%; border-collapse: collapse; }
-  .coin-table th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 4px 6px; text-align: right; }
+  .coin-table th { color: var(--muted); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 3px 5px; text-align: right; }
   .coin-table th:first-child { text-align: left; }
-  .coin-table td { padding: 5px 6px; text-align: right; border-top: 1px solid var(--border); }
+  .coin-table td { padding: 3px 5px; text-align: right; border-top: 1px solid var(--border); }
   .coin-table td:first-child { text-align: left; font-weight: 600; }
   .coin-name { display: flex; align-items: center; gap: 6px; }
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 700; text-transform: uppercase; }
@@ -100,8 +100,16 @@
     .ov-divider { display: none; }
   }
 
-  /* ── Main layout ── */
-  .main-col { display: flex; flex-direction: column; gap: 12px; }
+  /* ── Main layout: strategy grid (left) + chart (right) side-by-side ── */
+  .main-col {
+    display: grid;
+    grid-template-columns: 1fr 640px;
+    gap: 12px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .main-col { grid-template-columns: 1fr; }
+  }
 
   /* ── Drawer toggle button ── */
   .drawer-btn {
@@ -252,7 +260,7 @@
     <div class="ov-item">
       <div class="ov-label">Open Positions</div>
       <div class="ov-value" id="ov-pos">—</div>
-      <div class="ov-sub">/ 12 slots</div>
+      <div class="ov-sub">/ 20 slots</div>
     </div>
     <div class="ov-divider"></div>
     <div class="ov-item">
@@ -312,7 +320,7 @@
 </aside>
 
 <script>
-const STRATEGIES = ["breakout", "calmar", "regime"];
+const STRATEGIES = ["breakout", "calmar", "regime", "martingale"];
 const COINS      = ["btc", "eth", "sol", "hype", "sui"];
 const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa", sui: "#4da2ff" };
 
@@ -446,8 +454,6 @@ function renderSummary(data) {
             data-notional="${c.notional || 0}"
             data-direction="${c.direction || ''}"
             data-capital="${c.capital || 10000}">${upnlHtml}</td>
-        <td>${c.total_trades ?? 0}</td>
-        <td>${c.win_rate != null ? c.win_rate + "%" : "—"}</td>
         <td style="color:var(--muted);font-size:12px">${c.entry_price ? c.entry_price.toLocaleString() : "—"}</td>
         <td data-curprice="${strat}-${coin}" style="font-size:12px">—</td>
       </tr>`;
@@ -475,7 +481,7 @@ function renderSummary(data) {
       <div class="card-body">
         <table class="coin-table">
           <thead><tr>
-            <th>Coin</th><th>Capital</th><th>Return</th><th>Unrealised</th><th>Trades</th><th>Win%</th><th>Entry</th><th>Price</th>
+            <th>Coin</th><th>Capital</th><th>Return</th><th>Unrealised</th><th>Entry</th><th>Price</th>
           </tr></thead>
           <tbody>${coinRows}</tbody>
         </table>
@@ -629,7 +635,7 @@ async function refreshPricesOnly(prices) {
 function initChart() {
   const container = document.getElementById('btc-chart-container');
   _chart = LightweightCharts.createChart(container, {
-    height: 360,
+    height: 460,
     layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
     grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
