@@ -114,11 +114,11 @@ def _parse_log_tail(strategy: str, n_lines: int = 300) -> dict:
                 next_dt = now_utc.replace(
                     hour=t.hour, minute=t.minute, second=t.second, microsecond=0
                 )
-                # If the time has already passed today, advance by 1h until in future
+                # Advance to next future occurrence using strategy-appropriate step
+                step = timedelta(minutes=5) if strategy == "boll_scalp" else timedelta(hours=1)
                 if next_dt <= now_utc:
-                    from datetime import timedelta
                     while next_dt <= now_utc:
-                        next_dt += timedelta(hours=1)
+                        next_dt += step
                 remaining_s = round((next_dt - now_utc).total_seconds())
                 next_cycle_in = {
                     "at": next_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
