@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Conda / venv
+.venv/
+env/
+
+# Logs (mounted as volume)
+logs/
+
+# Git
+.git/
+.gitignore
+
+# Misc
+*.code-search
+.DS_Store
+Logo.png
+paper_trade_dashboard.png

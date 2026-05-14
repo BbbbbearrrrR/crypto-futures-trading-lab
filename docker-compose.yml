@@ -1,0 +1,14 @@
+services:
+  trading-lab:
+    build: .
+    container_name: crypto-trading-lab
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    env_file:
+      - .env          # BINANCE_API_KEY, BINANCE_API_SECRET
+    volumes:
+      - ./paper:/app/paper          # state + trade logs (persistent)
+      - ./data:/app/data            # OHLCV CSVs (persistent)
+      - ./logs:/app/logs            # process logs (persistent)
+      - ./results:/app/results      # backtest/tune results (persistent)
