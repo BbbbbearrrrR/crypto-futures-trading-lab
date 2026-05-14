@@ -70,6 +70,10 @@ def make_exchange() -> ccxt.binance:
     return ex
 
 
+# Public market data exchange — never uses testnet, reliable for intrabar checks
+_ex_pub = ccxt.binanceusdm({"enableRateLimit": True})
+
+
 def fetch_ohlcv(ex, symbol: str, tf: str, limit: int) -> pd.DataFrame:
     raw = ex.fetch_ohlcv(symbol, tf, limit=limit + 1)
     df  = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
@@ -360,7 +364,7 @@ def check_intrabar_sl(ex, state: dict, best: dict):
         if not martin_d:
             continue
         try:
-            raw     = ex.fetch_ohlcv(symbol, "1h", limit=1)
+            raw     = _ex_pub.fetch_ohlcv(symbol, "1h", limit=1)
             f_high  = float(raw[-1][2])
             f_low   = float(raw[-1][3])
             martin  = _dict_to_martin(martin_d)
