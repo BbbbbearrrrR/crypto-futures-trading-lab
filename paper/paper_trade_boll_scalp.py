@@ -53,8 +53,7 @@ BEST_PARAMS_FILE = _ROOT / "results/boll_scalp/best_params.json"
 API_KEY    = os.getenv("BINANCE_API_KEY", "")
 API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
-# BTC excluded (calmar < 1 in backtest)
-COINS = [(sym, coin) for sym, coin in bs.COINS if coin != "btc"]
+COINS = list(bs.COINS)
 
 
 # ── Exchange ──────────────────────────────────────────────────────────────────

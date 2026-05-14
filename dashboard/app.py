@@ -25,7 +25,7 @@ STRATEGIES = ["breakout", "calmar", "regime", "martingale", "boll_scalp", "boll_
 COINS      = ["btc", "eth", "sol", "hype", "sui"]
 # coins per strategy (boll_scalp 5m skips BTC; boll_scalp_1h includes all)
 STRATEGY_COINS = {s: COINS for s in STRATEGIES}
-STRATEGY_COINS["boll_scalp"] = ["eth", "sol", "hype", "sui"]
+# boll_scalp uses all 5 coins
 
 COIN_SYMBOLS = {
     "btc":  "BTC/USDT:USDT",

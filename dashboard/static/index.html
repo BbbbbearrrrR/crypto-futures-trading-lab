@@ -28,7 +28,7 @@
   main { padding: 12px 24px; display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Strategy cards: always 2-column grid ── */
-  .strategy-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .strategy-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 
   .strategy-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-height: 260px; }
   .strategy-card.has-position { border-color: var(--yellow); }
@@ -94,9 +94,6 @@
   .ov-divider { width: 1px; background: var(--border); align-self: stretch; margin: 0 4px; }
 
   /* responsive */
-  @media (max-width: 900px) {
-    .strategy-grid { grid-template-columns: repeat(2, 1fr); }
-  }
   @media (max-width: 600px) {
     .strategy-grid { grid-template-columns: 1fr; }
     header { flex-direction: column; gap: 8px; align-items: flex-start; }
@@ -343,7 +340,7 @@ const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00
 // coins per strategy (boll_scalp 5m skips BTC; boll_scalp_1h includes all)
 const STRATEGY_COINS = {};
 STRATEGIES.forEach(s => STRATEGY_COINS[s] = COINS);
-STRATEGY_COINS["boll_scalp"] = ["eth", "sol", "hype", "sui"];
+// boll_scalp uses all 5 coins
 
 let activeTab = "breakout";
 let summaryCache = {};
