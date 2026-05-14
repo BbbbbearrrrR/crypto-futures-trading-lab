@@ -36,16 +36,17 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent
 
-STRATEGIES = ["breakout", "calmar", "regime", "martingale", "boll_scalp"]
+STRATEGIES = ["breakout", "calmar", "regime", "martingale", "boll_scalp", "boll_scalp_1h"]
 
 ALL_COINS = ["btc", "eth", "sol", "hype", "sui"]
 
 RESULTS_DIRS = {
-    "breakout":   _ROOT / "results/breakout",
-    "calmar":     _ROOT / "results/calmar",
-    "regime":     _ROOT / "results/regime",
-    "martingale": _ROOT / "results/martingale",
-    "boll_scalp": _ROOT / "results/boll_scalp",
+    "breakout":      _ROOT / "results/breakout",
+    "calmar":        _ROOT / "results/calmar",
+    "regime":        _ROOT / "results/regime",
+    "martingale":    _ROOT / "results/martingale",
+    "boll_scalp":    _ROOT / "results/boll_scalp",
+    "boll_scalp_1h": _ROOT / "results/boll_scalp_1h",
 }
 
 
@@ -96,11 +97,12 @@ def run_tune(strategies: list, coin_filter: list | None, n_trials: int = 1000):
     # lazy import after env vars are set
     import importlib
     modules = {
-        "breakout":   "backtest.backtest_breakout",
-        "calmar":     "backtest.backtest_calmar",
-        "regime":     "backtest.backtest_regime",
-        "martingale": "backtest.backtest_martingale",
-        "boll_scalp": "backtest.backtest_boll_scalp",
+        "breakout":      "backtest.backtest_breakout",
+        "calmar":        "backtest.backtest_calmar",
+        "regime":        "backtest.backtest_regime",
+        "martingale":    "backtest.backtest_martingale",
+        "boll_scalp":    "backtest.backtest_boll_scalp",
+        "boll_scalp_1h": "backtest.backtest_boll_scalp_1h",
     }
 
     total = len(strategies)
