@@ -80,6 +80,52 @@ Results saved to `results/regime/`.
 
 ---
 
+### 4. Martingale — `backtest_martingale.py`
+
+Bollinger Band mean-reversion with martingale position sizing (double-down on adverse moves).
+
+| Component | Detail |
+|---|---|
+| Entry | Close crosses BB lower/upper band |
+| Sizing | Double position on each adverse re-entry (up to `MAX_LAYERS`) |
+| TP | BB mid (full close) |
+| SL | Hard stop after max layers or `MAX_HOLD_BARS` |
+| Risk | High drawdown profile — use conservative `BASE_RISK` |
+
+Results saved to `results/martingale/`.
+
+---
+
+### 5. Boll Scalp — `backtest_boll_scalp.py`
+
+Bollinger Band scalping on 5m candles with fixed R:R stop-loss and optional volume-price divergence early exit.
+
+| Component | Detail |
+|---|---|
+| Entry | 5m close crosses below lower band → long (only if close > EMA trend) |
+|       | 5m close crosses above upper band → short (only if close < EMA trend) |
+| Trend filter | EMA(`TREND_EMA_PERIOD`) on 5m |
+| SL | `entry ± SL_TP_RATIO × |bb_mid − entry|` (fixed R:R) |
+| TP1 | `bb_mid` — close 50% (if `USE_PARTIAL_TP=True`), SL moves to breakeven |
+| TP2 | Opposite BB band — close remaining |
+| Early TP | Volume-price divergence: price moving in trade direction while volume shrinks over `VOL_DIV_PERIOD` bars → close at market (`VOL_DIV_PERIOD=0` disables) |
+| Time exit | Force-close after `MAX_HOLD_BARS` × 5m bars |
+| Optimise | Calmar ratio |
+
+**Best backtest results (per-coin optimal params, $10k initial):**
+
+| Coin | Trades | Win% | Return | Max DD | Calmar | VOL_DIV |
+|---|---|---|---|---|---|---|
+| BTC  | 82 | 56% |  6.1% | 7.3% |  0.84 | — |
+| ETH  | 52 | 73% | 18.3% | 3.2% |  5.64 | — |
+| SOL  | 23 | 48% | 17.0% | 7.5% |  2.25 | — |
+| HYPE | 56 | 71% | 43.6% | 4.3% | 10.14 | 5 |
+| SUI  | 24 | 58% |  2.7% | 1.9% |  1.40 | — |
+
+Results saved to `results/boll_scalp/`.
+
+---
+
 ## Project Structure
 
 ```
@@ -92,12 +138,15 @@ Results saved to `results/regime/`.
 │   ├── backtest_breakout.py      # Strategy 1: Donchian breakout (return-optimised)
 │   ├── backtest_calmar.py        # Strategy 2: Donchian breakout (Calmar-optimised)
 │   ├── backtest_regime.py        # Strategy 3: Regime-switching breakout
-│   └── backtest_martingale.py    # Strategy 4: BB martingale (not active in paper trading)
+│   ├── backtest_martingale.py    # Strategy 4: BB martingale
+│   └── backtest_boll_scalp.py   # Strategy 5: BB scalping on 5m (SL_TP_RATIO + VOL_DIV)
 │
 ├── paper/
 │   ├── paper_trade_breakout.py   # Live paper trader — imports backtest_breakout
 │   ├── paper_trade_calmar.py     # Live paper trader — imports backtest_calmar
-│   └── paper_trade_regime.py     # Live paper trader — imports backtest_regime
+│   ├── paper_trade_regime.py     # Live paper trader — imports backtest_regime
+│   ├── paper_trade_martingale.py # Live paper trader — imports backtest_martingale
+│   └── paper_trade_boll_scalp.py # Live paper trader — imports backtest_boll_scalp
 │
 ├── dashboard/
 │   ├── app.py                    # Flask backend (port 5050)
@@ -111,8 +160,9 @@ Results saved to `results/regime/`.
 ├── results/
 │   ├── breakout/best_params.json
 │   ├── calmar/best_params.json
+│   ├── regime/best_params.json
 │   ├── martingale/best_params.json
-│   └── regime/best_params.json
+│   └── boll_scalp/best_params.json
 │
 └── logs/                         # Paper trader + dashboard runtime logs
 ```
