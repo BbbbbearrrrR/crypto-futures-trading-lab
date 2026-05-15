@@ -41,6 +41,9 @@ import numpy as np
 from backtest import backtest_breakout as bb
 
 # ── Config ────────────────────────────────────────────────────────────────────
+# USE_TESTNET removed — Binance futures testnet is discontinued.
+# Use Binance Demo Trading instead (https://www.binance.com/en/futures/BTCUSDT).
+# Generate a Demo API key on Binance and set BINANCE_API_KEY / BINANCE_API_SECRET.
 DRY_RUN          = "--dry-run" in sys.argv
 # Your total account balance. Each coin gets INITIAL_CAPITAL / len(COINS) as its
 # virtual starting capital so simultaneous entries across coins don't over-allocate.
@@ -496,7 +499,7 @@ def seconds_to_next_candle() -> float:
 def main():
     reset = "--reset" in sys.argv
 
-    mode_str = "DRY-RUN" if DRY_RUN else "⚠ LIVE REAL MONEY ⚠"
+    mode_str = "DRY-RUN" if DRY_RUN else "DEMO / LIVE"
     print("╔═══════════════════════════════════════════════════════════╗")
     print("║   LIVE TRADING ENGINE — Breakout Strategy                 ║")
     print(f"║   Mode    : {mode_str:<49}║")
@@ -511,12 +514,6 @@ def main():
     if not BEST_PARAMS_FILE.exists():
         print(f"ERROR: {BEST_PARAMS_FILE} not found. Run auto_tune first.")
         sys.exit(1)
-
-    if not DRY_RUN:
-        confirm = input("⚠  LIVE REAL MONEY MODE. Type 'yes' to continue: ")
-        if confirm.strip() != "yes":
-            print("Aborted.")
-            sys.exit(0)
 
     if reset:
         STATE_FILE.unlink(missing_ok=True)

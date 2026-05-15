@@ -37,6 +37,8 @@ import numpy as np
 from backtest import backtest_boll_scalp as bs
 
 # ── Config ────────────────────────────────────────────────────────────────────
+# USE_TESTNET removed — Binance futures testnet is discontinued.
+# Use Binance Demo Trading instead (https://www.binance.com/en/futures/BTCUSDT).
 DRY_RUN           = "--dry-run" in sys.argv
 # Your total account balance allocated to this strategy.
 # Each coin gets INITIAL_CAPITAL / len(COINS) as its virtual starting capital
@@ -568,7 +570,7 @@ def seconds_to_next_candle() -> float:
 def main():
     reset = "--reset" in sys.argv
 
-    mode_str = "DRY-RUN" if DRY_RUN else "⚠ LIVE REAL MONEY ⚠"
+    mode_str = "DRY-RUN" if DRY_RUN else "DEMO / LIVE"
     print("╔═══════════════════════════════════════════════════════════╗")
     print("║   LIVE TRADING ENGINE — Boll Scalp 5m                    ║")
     print(f"║   Mode    : {mode_str:<49}║")
@@ -583,12 +585,6 @@ def main():
     if not BEST_PARAMS_FILE.exists():
         print(f"ERROR: {BEST_PARAMS_FILE} not found. Run tune.py first.")
         sys.exit(1)
-
-    if not DRY_RUN:
-        confirm = input("⚠  LIVE REAL MONEY MODE. Type 'yes' to continue: ")
-        if confirm.strip() != "yes":
-            print("Aborted.")
-            sys.exit(0)
 
     if reset:
         STATE_FILE.unlink(missing_ok=True)
