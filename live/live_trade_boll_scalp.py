@@ -37,7 +37,6 @@ import numpy as np
 from backtest import backtest_boll_scalp as bs
 
 # ── Config ────────────────────────────────────────────────────────────────────
-USE_TESTNET       = True
 DRY_RUN           = "--dry-run" in sys.argv
 # Your total account balance allocated to this strategy.
 # Each coin gets INITIAL_CAPITAL / len(COINS) as its virtual starting capital
@@ -51,8 +50,8 @@ STATE_FILE        = _HERE / "live_state_boll_scalp.json"
 TRADE_LOG_FILE    = _HERE / "live_trades_boll_scalp.csv"
 BEST_PARAMS_FILE  = _ROOT / "results/boll_scalp/best_params.json"
 
-API_KEY    = os.getenv("BINANCE_TESTNET_API_KEY", "")
-API_SECRET = os.getenv("BINANCE_TESTNET_API_SECRET", "")
+API_KEY    = os.getenv("BINANCE_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
 COINS = list(bs.COINS)
 
@@ -65,8 +64,6 @@ def make_exchange() -> ccxt.binanceusdm:
         "enableRateLimit": True,
         "options":         {"defaultType": "future"},
     })
-    if USE_TESTNET:
-        ex.set_sandbox_mode(True)
     return ex
 
 
@@ -571,7 +568,7 @@ def seconds_to_next_candle() -> float:
 def main():
     reset = "--reset" in sys.argv
 
-    mode_str = "DRY-RUN" if DRY_RUN else ("TESTNET" if USE_TESTNET else "⚠ LIVE REAL MONEY ⚠")
+    mode_str = "DRY-RUN" if DRY_RUN else "⚠ LIVE REAL MONEY ⚠"
     print("╔═══════════════════════════════════════════════════════════╗")
     print("║   LIVE TRADING ENGINE — Boll Scalp 5m                    ║")
     print(f"║   Mode    : {mode_str:<49}║")
@@ -580,14 +577,14 @@ def main():
     print("╚═══════════════════════════════════════════════════════════╝\n")
 
     if not API_KEY and not DRY_RUN:
-        print("ERROR: BINANCE_TESTNET_API_KEY not set.")
+        print("ERROR: BINANCE_API_KEY not set.")
         sys.exit(1)
 
     if not BEST_PARAMS_FILE.exists():
         print(f"ERROR: {BEST_PARAMS_FILE} not found. Run tune.py first.")
         sys.exit(1)
 
-    if not USE_TESTNET and not DRY_RUN:
+    if not DRY_RUN:
         confirm = input("⚠  LIVE REAL MONEY MODE. Type 'yes' to continue: ")
         if confirm.strip() != "yes":
             print("Aborted.")
