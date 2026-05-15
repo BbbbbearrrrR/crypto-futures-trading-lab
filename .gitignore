@@ -30,5 +30,10 @@ live/live_state_*.json
 live/live_trades_*.csv
 live/*.log
 
+# Real trading runtime artifacts
+real/real_state_*.json
+real/real_trades_*.csv
+real/*.log
+
 logs/
 .env
