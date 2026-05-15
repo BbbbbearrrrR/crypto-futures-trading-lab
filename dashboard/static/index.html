@@ -300,12 +300,18 @@
         </div>
         <span class="chart-price" id="chart-live-price">—</span>
       </div>
-      <div class="chart-coin-tabs" id="chart-coin-tabs">
-        <button class="chart-tab active" data-coin="btc">BTC</button>
-        <button class="chart-tab" data-coin="eth">ETH</button>
-        <button class="chart-tab" data-coin="sol">SOL</button>
-        <button class="chart-tab" data-coin="hype">HYPE</button>
-        <button class="chart-tab" data-coin="sui">SUI</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:0 16px">
+        <div class="chart-coin-tabs" id="chart-coin-tabs" style="border:none;padding:8px 0">
+          <button class="chart-tab active" data-coin="btc">BTC</button>
+          <button class="chart-tab" data-coin="eth">ETH</button>
+          <button class="chart-tab" data-coin="sol">SOL</button>
+          <button class="chart-tab" data-coin="hype">HYPE</button>
+          <button class="chart-tab" data-coin="sui">SUI</button>
+        </div>
+        <div class="chart-coin-tabs" id="chart-tf-tabs" style="border:none;padding:8px 0">
+          <button class="chart-tab active" data-tf="1h">1H</button>
+          <button class="chart-tab" data-tf="5m">5M</button>
+        </div>
       </div>
       <div id="btc-chart-container"></div>
     </div>
@@ -334,7 +340,7 @@
 </aside>
 
 <script>
-const STRATEGIES = ["breakout", "calmar", "regime", "martingale", "boll_scalp", "boll_scalp_1h"];
+const STRATEGIES = ["breakout", "boll_scalp", "boll_scalp_1h"];
 const COINS      = ["btc", "eth", "sol", "hype", "sui"];
 const COIN_COLORS = { btc: "#f7931a", eth: "#627eea", sol: "#9945ff", hype: "#00d4aa", sui: "#4da2ff" };
 // coins per strategy (boll_scalp 5m skips BTC; boll_scalp_1h includes all)
@@ -348,6 +354,7 @@ let pricesCache  = {};
 let lastCycleKey = "";  // track last seen cycle timestamps to detect new cycles
 let _chart = null, _candleSeries = null, _volSeries = null, _bbUpper = null, _bbMid = null, _bbLower = null, _priceLines = [];
 let _activeChartCoin = 'btc';
+let _activeChartTf = '1h';
 const INITIAL_CAP_PER_COIN = 10000;
 const TOTAL_INITIAL = STRATEGIES.reduce((sum, s) => sum + STRATEGY_COINS[s].length * INITIAL_CAP_PER_COIN, 0);
 
@@ -421,9 +428,6 @@ function renderOverview(ov) {
 function stratLabel(s) {
   const MAP = {
     breakout:     "Breakout",
-    calmar:       "Calmar",
-    regime:       "Regime",
-    martingale:   "Martingale",
     boll_scalp:   "Boll Scalp 5m",
     boll_scalp_1h:"Boll Scalp 1h",
   };
@@ -549,32 +553,6 @@ async function loadTrades(strategy) {
         const dot  = `<span style="color:${COIN_COLORS[p.coin]||'var(--text)'};font-size:11px">●</span>`;
         const dir  = p.direction ?? '';
         const dirCls = dir === 'long' ? 'badge-long' : dir === 'short' ? 'badge-short' : 'badge-flat';
-        // Martingale: show each entry level
-        if (p.entries) {
-          const entryRows = p.entries.map((e, i) =>
-            `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:1px 0">
-              <span>Lvl ${i}</span>
-              <span>@ ${e.price.toLocaleString('en-US',{maximumFractionDigits:4})}</span>
-            </div>`
-          ).join('');
-          const avg  = (p.avg_entry||0).toLocaleString('en-US',{maximumFractionDigits:4});
-          const tp   = (p.tp_price||0).toLocaleString('en-US',{maximumFractionDigits:4});
-          const sl   = p.sl_price != null ? p.sl_price.toLocaleString('en-US',{maximumFractionDigits:4}) : '—';
-          return `<div class="trade-card">
-            <div class="trade-card-top">
-              <span class="trade-card-coin">${dot}${coin} <span class="badge ${dirCls}">${dir}</span></span>
-              <span style="font-size:12px;font-weight:700;color:var(--blue)">$${(p.total_notional||0).toFixed(1)}</span>
-            </div>
-            <div style="margin-top:4px">${entryRows}</div>
-            <div class="trade-card-meta" style="margin-top:4px">
-              <span><b>Entry</b> ${avg}</span>
-            </div>
-            <div class="trade-card-meta">
-              <span><b>TP</b> ${tp}</span>
-              <span><b>SL</b> ${sl}</span>
-            </div>
-          </div>`;
-        }
         // Other strategies: single entry (boll_scalp has tp1+tp2)
         const size = (p.notional||0).toLocaleString('en-US',{maximumFractionDigits:2});
         const tp1Html = p.tp1_price
@@ -799,10 +777,11 @@ function initChart() {
   }).observe(container);
 }
 
-async function loadCandles(coin) {
+async function loadCandles(coin, tf) {
   coin = coin || _activeChartCoin;
+  tf   = tf   || _activeChartTf;
   try {
-    const res = await fetch(`/api/candles/${coin}`);
+    const res = await fetch(`/api/candles/${coin}?tf=${tf}`);
     const candles = await res.json();
     if (!candles.length) return;
     _candleSeries.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
@@ -834,7 +813,7 @@ async function loadCandles(coin) {
     const chgEl = document.getElementById('chart-change');
     chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
     chgEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
-    document.getElementById('chart-title').textContent = coin.toUpperCase() + ' / USDT \u00b7 1H';
+    document.getElementById('chart-title').textContent = coin.toUpperCase() + ' / USDT \u00b7 ' + tf.toUpperCase();
     // put latest candle at ~75% from left (75 bars history + 25 bars empty on right)
     const total = candles.length;
     requestAnimationFrame(() => {
@@ -886,7 +865,7 @@ function closeDrawer() {
 
 initChart();
 loadCandles('btc');
-setInterval(() => loadCandles(_activeChartCoin), 60000);
+setInterval(() => loadCandles(_activeChartCoin, _activeChartTf), 60000);
 
 // UTC clock + countdowns — one shared interval so they're always in sync
 function tickClock() {
@@ -904,12 +883,22 @@ setInterval(tickClock, 1000);
 document.getElementById('chart-coin-tabs').addEventListener('click', e => {
   const btn = e.target.closest('.chart-tab');
   if (!btn) return;
-  document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#chart-coin-tabs .chart-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   _activeChartCoin = btn.dataset.coin;
-  loadCandles(_activeChartCoin);
+  loadCandles(_activeChartCoin, _activeChartTf);
   updateChartPrice();
   updateChartPositions();
+});
+
+// Chart timeframe tab switching
+document.getElementById('chart-tf-tabs').addEventListener('click', e => {
+  const btn = e.target.closest('.chart-tab');
+  if (!btn) return;
+  document.querySelectorAll('#chart-tf-tabs .chart-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _activeChartTf = btn.dataset.tf;
+  loadCandles(_activeChartCoin, _activeChartTf);
 });
 
 renderTabs();

@@ -21,7 +21,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _PAPER = _ROOT / "paper"
 _LOGS  = _ROOT / "logs"
 
-STRATEGIES = ["breakout", "calmar", "regime", "martingale", "boll_scalp", "boll_scalp_1h"]
+STRATEGIES = ["breakout", "boll_scalp", "boll_scalp_1h"]
 COINS      = ["btc", "eth", "sol", "hype", "sui"]
 # coins per strategy (boll_scalp 5m skips BTC; boll_scalp_1h includes all)
 STRATEGY_COINS = {s: COINS for s in STRATEGIES}
@@ -163,28 +163,12 @@ def api_summary():
             peak = cs.get("peak_cap", 10000.0)
             trades_list = cs.get("trades", [])
 
-            # Martingale uses a nested 'martin' object instead of flat fields
-            martin_obj = cs.get("martin")
-            if martin_obj is not None:
-                in_trade  = True
-                direction = martin_obj.get("direction")
-                entries   = martin_obj.get("entries", [])
-                entry     = entries[0][0] if entries else 0.0
-                notional  = martin_obj.get("notional", 0.0)
-                sl        = 0.0
-                tp        = 0.0
-            elif "martin" in cs:
-                # key exists but is null → flat, no position
-                in_trade  = False
-                direction = None
-                entry = sl = tp = notional = 0.0
-            else:
-                in_trade  = cs.get("in_trade", False)
-                direction = cs.get("direction")
-                entry     = cs.get("entry_price", 0.0)
-                sl        = cs.get("sl_price", 0.0)
-                tp        = cs.get("tp_price", 0.0)
-                notional  = cs.get("notional", 0.0)
+            in_trade  = cs.get("in_trade", False)
+            direction = cs.get("direction")
+            entry     = cs.get("entry_price", 0.0)
+            sl        = cs.get("sl_price", 0.0)
+            tp        = cs.get("tp_price", 0.0)
+            notional  = cs.get("notional", 0.0)
 
             total_capital += cap
             total_initial += 10000.0
@@ -238,52 +222,6 @@ def api_trades(strategy: str):
     return jsonify(trades)
 
 
-def _martin_tp_sl(martin_obj: dict, coin: str) -> tuple:
-    """Compute current TP and SL prices for an open martingale position."""
-    try:
-        params_path = _ROOT / "results" / "martingale" / "best_params.json"
-        all_params = json.loads(params_path.read_text())
-        p = all_params.get(coin, {}).get("params", {})
-        leverage        = p.get("LEVERAGE", 20)
-        tp_margin_rate  = p.get("TP_MARGIN_RATE", 1.0)
-        tp_scale_levels = p.get("TP_SCALE_LEVELS", 1)
-        tp_scale_mult   = p.get("TP_SCALE_MULT", 2.0)
-        sl_capital_rate = p.get("SL_CAPITAL_RATE", 0.5)
-
-        entries  = martin_obj.get("entries", [])
-        tp_tier  = martin_obj.get("tp_tier", 0)
-        capital  = martin_obj.get("capital", 0)
-        direction = martin_obj.get("direction", "long")
-
-        if not entries:
-            return 0.0, 0.0
-
-        sum_n        = sum(n for _, n in entries)
-        sum_pn       = sum(p_ * n for p_, n in entries)
-        avg          = sum_pn / sum_n
-
-        mult = (tp_scale_mult ** tp_tier) if tp_scale_levels > 1 else 1.0
-        move = tp_margin_rate * mult / leverage
-        tp   = avg * (1 + move) if direction == "long" else avg * (1 - move)
-
-        target_loss  = sl_capital_rate * capital
-        sum_n_over_p = sum(n / p_ for p_, n in entries)
-        if direction == "long":
-            sl = (sum_n - target_loss) / sum_n_over_p
-        else:
-            sl = (sum_n + target_loss) / sum_n_over_p
-
-        # SL is impossible to hit if price goes negative (long) or absurdly high (short)
-        if direction == "long" and sl <= 0:
-            sl = None
-        elif direction == "short" and sl > avg * 5:
-            sl = None
-
-        return tp, sl
-    except Exception:
-        return 0.0, 0.0
-
-
 @app.route("/api/positions/<strategy>")
 def api_positions(strategy: str):
     """Return current open positions for a strategy."""
@@ -293,24 +231,7 @@ def api_positions(strategy: str):
     positions = []
     for coin in STRATEGY_COINS.get(strategy, COINS):
         cs = state.get(coin, {})
-        martin_obj = cs.get("martin")
-        if martin_obj is not None:
-            entries = martin_obj.get("entries", [])
-            avg_entry = (sum(p * n for p, n in entries) / sum(n for _, n in entries)) if entries else 0
-            tp, sl = _martin_tp_sl(martin_obj, coin)
-            positions.append({
-                "coin": coin,
-                "direction": martin_obj.get("direction"),
-                "level": martin_obj.get("level", 0),
-                "profit_level": martin_obj.get("profit_level", 0),
-                "entries": [{"price": e[0], "notional": e[1]} for e in entries],
-                "avg_entry": avg_entry,
-                "total_notional": sum(n for _, n in entries),
-                "tp_price": tp,
-                "sl_price": sl,
-            })
-        elif "martin" not in cs and cs.get("in_trade"):
-            # boll_scalp uses tp1/tp2; others use tp_price
+        if cs.get("in_trade"):
             tp_price = cs.get("tp_price") or cs.get("tp2_price")
             positions.append({
                 "coin": coin,
@@ -336,12 +257,17 @@ _COIN_SYMBOLS = {
 
 @app.route("/api/candles/<coin>")
 def api_candles(coin: str):
-    """Return last 300 1h candles for the given coin fetched live from Binance."""
+    """Return candles for the given coin. Query param tf=1h (default) or tf=5m."""
+    from flask import request as _req
     symbol = _COIN_SYMBOLS.get(coin.lower())
     if not symbol:
         return jsonify({"error": "unknown coin"}), 404
+    tf = _req.args.get("tf", "1h")
+    if tf not in ("1h", "5m"):
+        tf = "1h"
+    limit = 500 if tf == "5m" else 300
     try:
-        ohlcv = _exchange_pub.fetch_ohlcv(symbol, timeframe="1h", limit=300)
+        ohlcv = _exchange_pub.fetch_ohlcv(symbol, timeframe=tf, limit=limit)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     result = [

@@ -56,17 +56,21 @@ VOL_DIV_PERIOD  = 3        # bars to look back for volume-price divergence TP
 AUTO_TUNE = True
 
 TUNE_SPACE = {
-    "LEVERAGE":         [3, 5, 10],
-    "BASE_RISK":        [0.01, 0.02],
-    "BB_PERIOD":        [20, 40],
+    # ── Signal quality (most impactful) ──────────────────────────────────
+    "BB_PERIOD":        [15, 20, 30, 40],
     "BB_STD":           [1.5, 2.0, 2.5],
-    "SL_TP_RATIO":      [0.5, 0.75, 1.0, 1.5],
     "TREND_EMA_PERIOD": [50, 100, 200],
+    # ── Risk:reward ──────────────────────────────────────────────────────
+    "SL_TP_RATIO":      [0.5, 1.0, 1.5],
+    # ── Exit switches ────────────────────────────────────────────────────
     "USE_PARTIAL_TP":   [True, False],
-    "MAX_HOLD_BARS":    [12, 24, 48, 96],
+    "MAX_HOLD_BARS":    [12, 24, 48, 96],  # 12h / 1d / 2d / 4d
     "VOL_DIV_PERIOD":   [0, 3, 5],
+    # ── Position sizing ──────────────────────────────────────────────────────
+    "LEVERAGE":         [3, 5, 10],
+    # ── Fixed: BASE_RISK=0.01 (not in tune space)
 }
-# Total combinations per coin: 3×2×2×3×4×3×2×4×3 = 10368
+# Total: 4×3×3×3×2×4×3×3 = 7,776 combos
 
 COINS = [
     ("BTC/USDT:USDT", "btc"),
@@ -279,7 +283,15 @@ def run_backtest(symbol: str, coin: str):
     win_rate = wins / total if total else 0
     total_return = (capital - INITIAL_CAPITAL) / INITIAL_CAPITAL
     max_dd = t_df["drawdown"].max() if "drawdown" in t_df.columns else 0
-    calmar = total_return / max_dd if max_dd > 1e-6 else 0
+    # Annualised Calmar: use trade timestamps to compute holding span
+    try:
+        first_ts  = pd.Timestamp(t_df["exit_time"].iloc[0])
+        last_ts   = pd.Timestamp(t_df["exit_time"].iloc[-1])
+        span_days = max((last_ts - first_ts).days, 1)
+    except Exception:
+        span_days = 365  # fallback: ~1 year of 1h data
+    ann_ret = (capital / INITIAL_CAPITAL) ** (365.25 / span_days) - 1
+    calmar  = ann_ret / max_dd if max_dd > 1e-6 else float("inf")
     avg_pnl = t_df["pnl_usdt"].mean()
     profit_factor = (t_df.loc[t_df["pnl_usdt"] > 0, "pnl_usdt"].sum() /
                      abs(t_df.loc[t_df["pnl_usdt"] < 0, "pnl_usdt"].sum() + 1e-9))

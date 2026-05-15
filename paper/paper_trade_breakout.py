@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
 """
-Paper Trading Engine — Breakout Strategy
-=========================================
+Paper Trading Engine — Breakout Strategy  (v2 – ExitManager refactor)
+=======================================================================
 Runs the EXACT same signal logic as backtest_breakout.py against live 1h candles.
-No real money involved.
 
-Two modes:
-  USE_TESTNET = True  → Binance Testnet (real order book, fake USDT)
-  USE_TESTNET = False → Pure local simulation (no API key needed)
-
-State is persisted to paper_state_breakout.json so restarts don't lose positions.
+State is persisted to paper_state_breakout.json between runs.
 All fills are appended to paper_trades_breakout.csv.
 
 Usage:
-    export BINANCE_API_KEY=your_key
-    export BINANCE_API_SECRET=your_secret
-
     python paper_trade_breakout.py           # normal start
     python paper_trade_breakout.py --reset   # wipe state and start fresh
 """
 
-# ── Must be set BEFORE numpy import ──────────────────────────────────────────
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -39,14 +30,15 @@ import ccxt
 import pandas as pd
 import numpy as np
 
-from backtest import backtest_breakout as bb   # reuse prepare(), _apply_params()
+from backtest import backtest_breakout as bb
+from backtest.exit_manager import ExitManager
 
-# ── Config ────────────────────────────────────────────────────────────────────
-USE_TESTNET       = True        # True = Binance Testnet; False = pure simulation
-INITIAL_CAPITAL   = 10_000.0   # virtual USDT per coin
-WARMUP_1H         = 300        # 1h bars fetched for indicator warmup
-WARMUP_1D         = 500        # 1d bars fetched for EMA warmup
-SLEEP_BUFFER_SEC  = 15         # seconds to wait after candle close before processing
+# ---- Config ------------------------------------------------------------------
+USE_TESTNET      = True
+INITIAL_CAPITAL  = 10_000.0
+WARMUP_1H        = 300
+WARMUP_1D        = 500
+SLEEP_BUFFER_SEC = 15
 
 STATE_FILE       = _HERE / "paper_state_breakout.json"
 TRADE_LOG_FILE   = _HERE / "paper_trades_breakout.csv"
@@ -55,10 +47,10 @@ BEST_PARAMS_FILE = _ROOT / "results/breakout/best_params.json"
 API_KEY    = os.getenv("BINANCE_API_KEY", "")
 API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
-COINS = bb.COINS   # [("BTC/USDT:USDT", "btc"), ...]
+COINS = bb.COINS
 
 
-# ── Exchange ──────────────────────────────────────────────────────────────────
+# ---- Exchange ----------------------------------------------------------------
 def make_exchange() -> ccxt.binance:
     ex = ccxt.binance({
         "apiKey":  API_KEY,
@@ -69,24 +61,21 @@ def make_exchange() -> ccxt.binance:
         ex.set_sandbox_mode(True)
     return ex
 
-
-# Public market data exchange — never uses testnet, reliable for intrabar checks
 _ex_pub = ccxt.binanceusdm({"enableRateLimit": True})
 
 
 def fetch_ohlcv(ex, symbol: str, tf: str, limit: int) -> pd.DataFrame:
-    raw = _ex_pub.fetch_ohlcv(symbol, tf, limit=limit + 1)   # +1 for forming candle
+    raw = _ex_pub.fetch_ohlcv(symbol, tf, limit=limit + 1)
     df  = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
     df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
     df.index.name = "datetime"
     df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    # Drop forming (unclosed) candle
     now_hour = pd.Timestamp.now(tz="UTC").floor("h")
     df = df[df.index < now_hour]
     return df.tail(limit)
 
 
-# ── State ─────────────────────────────────────────────────────────────────────
+# ---- State -------------------------------------------------------------------
 def _default_state() -> dict:
     return {
         "capital":            INITIAL_CAPITAL,
@@ -97,8 +86,14 @@ def _default_state() -> dict:
         "sl_price":           0.0,
         "tp_price":           0.0,
         "notional":           0.0,
-        "trail_active":       False,
-        "trail_sl":           0.0,
+        "notional_full":      0.0,
+        # ExitManager-serialised state
+        "em_sl_dist":         0.0,
+        "em_partial_done":    False,
+        "em_trail_active":    False,
+        "em_trail_ref":       0.0,
+        "em_bars_held":       0,
+        # Misc
         "cooldown_remaining": 0,
         "open_time":          None,
         "last_processed_ts":  None,
@@ -129,100 +124,104 @@ def _log_trade(rec: dict):
     df.to_csv(TRADE_LOG_FILE, mode="a", index=False, header=hdr)
 
 
-# ── Position open ─────────────────────────────────────────────────────────────
-def _open_position(cs: dict, row: pd.Series, params: dict, ts):
-    d   = cs["direction"]
+def _exit_params_from(params: dict) -> dict:
+    """Build ExitManager params dict from best_params entry."""
+    return {
+        "USE_PARTIAL_TP":  params.get("USE_PARTIAL_TP",  True),
+        "PARTIAL_R":       params.get("PARTIAL_R",        1.0),
+        "PARTIAL_FRAC":    params.get("PARTIAL_FRAC",     0.5),
+        "USE_TRAIL":       params.get("USE_TRAIL",        True),
+        "TRAIL_ATR_MULT":  params.get("TRAIL_ATR_MULT",   1.0),
+        "TRAIL_TRIGGER_R": params.get("TRAIL_TRIGGER_R",  1.0),
+        "TP_RR":           params.get("TP_RR",            3.0),
+        "MAX_HOLD_BARS":   params.get("MAX_HOLD_BARS",    72),
+        "USE_TREND_EXIT":  params.get("USE_TREND_EXIT",   True),
+        "FEE_RATE":        bb.FEE_RATE,
+    }
+
+
+def _restore_em(cs: dict, params: dict) -> ExitManager:
+    """Reconstruct ExitManager from serialised coin-state."""
     ep  = cs["entry_price"]
-    cap = cs["capital"]
-    atr = float(row["atr"])
-
-    sl_dist     = atr * params.get("SL_MULT", 1.5)
-    sl_dist_pct = sl_dist / ep
-    leverage    = params.get("LEVERAGE", 10)
-    base_risk   = params.get("BASE_RISK", 0.01)
-    notional    = min(cap * base_risk / sl_dist_pct, cap * leverage)
-
-    tp_rr = params.get("TP_RR", 3.0)
-    if d == "long":
-        sp = ep - sl_dist
-        tp = ep + sl_dist * tp_rr
-    else:
-        sp = ep + sl_dist
-        tp = ep - sl_dist * tp_rr
-
-    cs.update({
-        "in_trade":     True,
-        "sl_price":     sp,
-        "tp_price":     tp,
-        "notional":     notional,
-        "trail_active": False,
-        "trail_sl":     sp,
-        "open_time":    str(ts),
-    })
-    print(f"    ▶ ENTRY  {d.upper():5s}  price={ep:.4f}  SL={sp:.4f}  TP={tp:.4f}"
-          f"  notional=${notional:.0f} ({notional/cap:.2f}x)  @{str(ts)[:16]}")
+    sl  = cs["sl_price"]
+    tp  = cs["tp_price"]
+    em  = ExitManager(cs["direction"], ep, sl, tp, _exit_params_from(params))
+    # Restore mutable fields
+    em.sl_dist     = cs["em_sl_dist"] or abs(ep - sl)
+    em.partial_done = cs["em_partial_done"]
+    em.trail_active = cs["em_trail_active"]
+    em._trail_ref   = cs["em_trail_ref"] or sl
+    em.bars_held    = cs["em_bars_held"]
+    # Re-sync sl to latest (trail may have moved it)
+    em.sl_price     = sl
+    return em
 
 
-# ── Per-bar processing ────────────────────────────────────────────────────────
+def _save_em(cs: dict, em: ExitManager):
+    """Persist ExitManager mutable state into coin-state dict."""
+    cs["sl_price"]         = em.sl_price
+    cs["tp_price"]         = em.tp_price
+    cs["em_sl_dist"]       = em.sl_dist
+    cs["em_partial_done"]  = em.partial_done
+    cs["em_trail_active"]  = em.trail_active
+    cs["em_trail_ref"]     = em._trail_ref
+    cs["em_bars_held"]     = em.bars_held
+
+
+# ---- Per-bar processing ------------------------------------------------------
 def process_bar(cs: dict, row: pd.Series, params: dict, coin: str, ts) -> list:
-    """Process one just-closed candle. Mutates cs in place. Returns fill records."""
+    """Process one just-closed candle. Mutates cs. Returns fill records."""
     records  = []
     cap      = cs["capital"]
     peak_cap = cs["peak_cap"]
 
-    # ── Exit ─────────────────────────────────────────────────────────────────
+    # -- Exit ------------------------------------------------------------------
     if cs["in_trade"]:
-        d  = cs["direction"]
-        ep = cs["entry_price"]
-        sp = cs["sl_price"]
-        tp = cs["tp_price"]
-        nt = cs["notional"]
+        em = _restore_em(cs, params)
+        result = em.update(row)
+        _save_em(cs, em)   # persist updated SL/trail state
 
-        # Trailing stop
-        use_trail = params.get("USE_TRAIL", False)
-        if use_trail:
-            profit  = (row["close"] - ep) if d == "long" else (ep - row["close"])
-            sl_abs  = abs(ep - cs["trail_sl"])
-            trig    = params.get("TRAIL_TRIGGER_R", 1.0)
-            if not cs["trail_active"] and sl_abs > 0 and profit >= trig * sl_abs:
-                cs["trail_active"] = True
-            if cs["trail_active"]:
-                atr = float(row["atr"])
-                tm  = params.get("TRAIL_MULT", 1.0)
-                sp = max(sp, row["low"]  - atr * tm) if d == "long" else min(sp, row["high"] + atr * tm)
-                cs["sl_price"] = sp
-
-        hit_tp = (row["high"] >= tp if d == "long" else row["low"]  <= tp)
-        hit_sl = (row["low"]  <= sp if d == "long" else row["high"] >= sp)
-
-        if hit_tp or hit_sl:
-            xp     = tp if hit_tp else sp
-            reason = "TP" if hit_tp else "SL"
-            pct    = (xp - ep) / ep if d == "long" else (ep - xp) / ep
-            pnl    = max(nt * pct - nt * bb.FEE_RATE * 2, -cap)
-            cap   += pnl
+        if result.partial:
+            pt    = result.partial
+            cn    = cs["notional_full"] * pt.frac
+            pnl_p = cn * pt.pnl_frac - cn * bb.FEE_RATE * 2
+            cap  += pnl_p
             peak_cap = max(peak_cap, cap)
+            cs["notional"] = cs["notional_full"] * (1.0 - pt.frac)
+            rec = dict(timestamp=str(ts), coin=coin, direction=cs["direction"],
+                       entry_price=cs["entry_price"], exit_price=round(pt.exit_price, 6),
+                       notional=round(cn, 4), exit_reason=pt.reason,
+                       pnl_usdt=round(pnl_p, 4), capital=round(cap, 4))
+            records.append(rec)
+            _log_trade(rec)
+            print(f"  [{coin.upper()}] ◑ PARTIAL_TP {cs['direction'].upper()}"
+                  f"  exit={pt.exit_price:.4f}  pnl=${pnl_p:+.2f}  cap=${cap:.0f}"
+                  f"  @{str(ts)[:16]}")
 
-            rec = dict(timestamp=str(ts), coin=coin, direction=d,
-                       entry_price=ep, exit_price=round(xp, 6),
-                       notional=round(nt, 4), exit_reason=reason,
+        if result.closed:
+            nt  = cs["notional"]
+            pnl = max(nt * result.pnl_frac - nt * bb.FEE_RATE * 2, -cap)
+            cap += pnl
+            peak_cap = max(peak_cap, cap)
+            rec = dict(timestamp=str(ts), coin=coin, direction=cs["direction"],
+                       entry_price=cs["entry_price"], exit_price=round(result.exit_price, 6),
+                       notional=round(nt, 4), exit_reason=result.reason,
                        pnl_usdt=round(pnl, 4), capital=round(cap, 4))
             records.append(rec)
             _log_trade(rec)
             cs["trades"].append(rec)
-
             sym = "✓" if pnl >= 0 else "✗"
-            print(f"    {sym} EXIT    {d.upper():5s} [{reason}]  exit={xp:.4f}"
+            print(f"  [{coin.upper()}] {sym} EXIT {cs['direction'].upper()}"
+                  f" [{result.reason}]  exit={result.exit_price:.4f}"
                   f"  pnl=${pnl:+.2f}  cap=${cap:.0f}  @{str(ts)[:16]}")
-
-            cs.update({"in_trade": False, "trail_active": False, "open_time": None})
-            if reason == "SL":
+            cs.update({"in_trade": False, "open_time": None})
+            if result.reason == "SL":
                 cs["cooldown_remaining"] = params.get("COOLDOWN_BARS", 0)
 
         cs["capital"]  = cap
         cs["peak_cap"] = peak_cap
 
-    # ── Entry ─────────────────────────────────────────────────────────────────
+    # -- Entry -----------------------------------------------------------------
     if not cs["in_trade"]:
         if cs["cooldown_remaining"] > 0:
             cs["cooldown_remaining"] -= 1
@@ -245,34 +244,76 @@ def process_bar(cs: dict, row: pd.Series, params: dict, coin: str, ts) -> list:
         entry_long  = bool(row.get("entry_long", False))
         entry_short = bool(row.get("entry_short", False))
 
-        if   entry_long  and     trend_up: sig = "long"
-        elif entry_short and not trend_up: sig = "short"
+        if   entry_long  and     trend_up: direction = "long"
+        elif entry_short and not trend_up: direction = "short"
         else: return records
 
-        cs["direction"]   = sig
-        cs["entry_price"] = float(row["close"])
-        _open_position(cs, row, params, ts)
+        # OBV divergence filter
+        if params.get("USE_OBV_FILTER", False):
+            if direction == "long"  and not bool(row.get("obv_above_ma", True)):
+                return records
+            if direction == "short" and not bool(row.get("obv_below_ma", True)):
+                return records
+
+        ep = float(row["close"])
+        sl_mode = params.get("SL_MODE", "donchian")
+        if sl_mode == "donchian":
+            sl_price = float(row["don_lower"]) if direction == "long" else float(row["don_upper"])
+            if direction == "long"  and sl_price >= ep: sl_price = ep - atr * 1.5
+            if direction == "short" and sl_price <= ep: sl_price = ep + atr * 1.5
+        else:
+            sl_mult  = params.get("SL_MULT", 1.5)
+            sl_price = ep - atr * sl_mult if direction == "long" else ep + atr * sl_mult
+
+        sl_dist_pct = abs(ep - sl_price) / ep
+        if sl_dist_pct < 1e-6:
+            return records
+
+        sl_dist  = abs(ep - sl_price)
+        tp_rr    = params.get("TP_RR", 3.0)
+        tp_price = ep + sl_dist * tp_rr if direction == "long" else ep - sl_dist * tp_rr
+
+        leverage  = params.get("LEVERAGE", 10)
+        base_risk = params.get("BASE_RISK", 0.01)
+        notional  = min(cap * base_risk / sl_dist_pct, cap * leverage)
+
+        em = ExitManager(direction, ep, sl_price, tp_price, _exit_params_from(params))
+
+        cs.update({
+            "in_trade":      True,
+            "direction":     direction,
+            "entry_price":   ep,
+            "sl_price":      sl_price,
+            "tp_price":      tp_price,
+            "notional":      notional,
+            "notional_full": notional,
+            "open_time":     str(ts),
+        })
+        _save_em(cs, em)
+        print(f"  [{coin.upper()}] ▶ ENTRY {direction.upper()}"
+              f"  price={ep:.4f}  SL={sl_price:.4f}  TP={tp_price:.4f}"
+              f"  notional=${notional:.0f}  @{str(ts)[:16]}")
 
     return records
 
 
-# ── Report ────────────────────────────────────────────────────────────────────
+# ---- Report ------------------------------------------------------------------
 def print_report(state: dict):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n{'═'*65}")
-    print(f"  PAPER PORTFOLIO (Breakout)  |  {now}")
+    print(f"  PAPER PORTFOLIO (Breakout v2)  |  {now}")
     print(f"{'═'*65}")
     total_cap = 0.0
     for _, coin in COINS:
-        cs    = state[coin]
-        cap   = cs["capital"]
-        ret   = (cap - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+        cs   = state[coin]
+        cap  = cs["capital"]
+        ret  = (cap - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
         total_cap += cap
-        n     = len(cs["trades"])
-        wins  = sum(1 for t in cs["trades"] if t["pnl_usdt"] > 0)
-        wr    = f"{wins/n*100:.0f}%" if n else " - "
-        pos   = (f"{cs['direction'].upper()} @ {cs['entry_price']:.4f}"
-                 if cs["in_trade"] else "flat")
+        n    = len(cs["trades"])
+        wins = sum(1 for t in cs["trades"] if t["pnl_usdt"] > 0)
+        wr   = f"{wins/n*100:.0f}%" if n else " - "
+        pos  = (f"{cs['direction'].upper()} @ {cs['entry_price']:.4f}"
+                if cs["in_trade"] else "flat")
         print(f"  {coin.upper():5s}  cap=${cap:>9.2f}  ret={ret:>+7.2f}%"
               f"  trades={n:>3d}  wr={wr:>4s}  [{pos}]")
     total_ret = (total_cap - INITIAL_CAPITAL * len(COINS)) / (INITIAL_CAPITAL * len(COINS)) * 100
@@ -281,7 +322,7 @@ def print_report(state: dict):
     print(f"{'═'*65}\n")
 
 
-# ── Main cycle ────────────────────────────────────────────────────────────────
+# ---- Main cycle --------------------------------------------------------------
 def run_cycle(ex, state: dict, best: dict):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n{'─'*65}")
@@ -297,14 +338,11 @@ def run_cycle(ex, state: dict, best: dict):
 
         try:
             bb._apply_params(params)
-
             df_1h = fetch_ohlcv(ex, symbol, "1h", WARMUP_1H)
             df_1d = fetch_ohlcv(ex, symbol, "1d", WARMUP_1D)
+            df    = bb.prepare(df_1h, df_1d)
+            cs    = state[coin]
 
-            df  = bb.prepare(df_1h, df_1d)
-            cs  = state[coin]
-
-            # Replay all candles missed while process was down
             last_ts = cs.get("last_processed_ts")
             if last_ts:
                 missed = df[df.index > pd.Timestamp(last_ts, tz="UTC")]
@@ -314,7 +352,7 @@ def run_cycle(ex, state: dict, best: dict):
                 missed = df.iloc[-1:]
 
             if len(missed) > 1:
-                print(f"  [{coin.upper()}] ⚠ replaying {len(missed)} missed candles "
+                print(f"  [{coin.upper()}] replaying {len(missed)} missed candles "
                       f"from {str(missed.index[0])[:16]}")
 
             for ts, row in missed.iterrows():
@@ -324,12 +362,13 @@ def run_cycle(ex, state: dict, best: dict):
                 el = "L✓" if bool(row.get("entry_long", False))  else "  "
                 es = "S✓" if bool(row.get("entry_short", False)) else "  "
                 print(f"  [{coin.upper()}]  close={row['close']:.4f}"
-                      f"  adx={adx_str}  trend={trend}  {vol_ok}  {el} {es}")
+                      f"  atr={row.get('atr', 0):.4f}  adx={adx_str}"
+                      f"  trend={trend}  {vol_ok}  {el} {es}")
                 process_bar(cs, row, params, coin, ts)
                 cs["last_processed_ts"] = str(ts)
 
         except ccxt.NetworkError as e:
-            print(f"  [{coin.upper()}] network error: {e}  — will retry next cycle")
+            print(f"  [{coin.upper()}] network error: {e}")
         except Exception:
             print(f"  [{coin.upper()}] unexpected error:")
             traceback.print_exc()
@@ -338,11 +377,11 @@ def run_cycle(ex, state: dict, best: dict):
     print_report(state)
 
 
-# ── Intrabar SL monitor ─────────────────────────────────────────────────────
-INTRABAR_CHECK_INTERVAL = 60  # seconds between live SL checks
+# ---- Intrabar SL monitor -----------------------------------------------------
+INTRABAR_CHECK_INTERVAL = 60
 
 def check_intrabar_sl(ex, state: dict, best: dict):
-    """Check live price vs SL/TP for all open positions between candle cycles."""
+    """Check live price vs SL/TP for open positions between candle closes."""
     changed = False
     for symbol, coin in COINS:
         cs = state[coin]
@@ -357,24 +396,24 @@ def check_intrabar_sl(ex, state: dict, best: dict):
                 tk     = _ex_pub.fetch_ticker(symbol)
                 f_high = float(tk["high"] or tk["last"])
                 f_low  = float(tk["low"]  or tk["last"])
-            d      = cs["direction"]
-            sp     = cs["sl_price"]
-            tp     = cs["tp_price"]
-            ep     = cs["entry_price"]
-            nt     = cs["notional"]
-            cap    = cs["capital"]
+
+            d  = cs["direction"]
+            sp = cs["sl_price"]
+            tp = cs["tp_price"]
+            ep = cs["entry_price"]
+            nt = cs["notional"]
+            cap = cs["capital"]
 
             hit_tp = (f_high >= tp if d == "long" else f_low  <= tp)
             hit_sl = (f_low  <= sp if d == "long" else f_high >= sp)
             if not hit_tp and not hit_sl:
                 continue
 
-            # SL takes priority (worst case) when both hit in same bar
             xp     = tp if (hit_tp and not hit_sl) else sp
             reason = "TP" if (hit_tp and not hit_sl) else "SL"
-            pct = (xp - ep) / ep if d == "long" else (ep - xp) / ep
-            pnl = max(nt * pct - nt * bb.FEE_RATE * 2, -cap)
-            cap += pnl
+            pct    = (xp - ep) / ep if d == "long" else (ep - xp) / ep
+            pnl    = max(nt * pct - nt * bb.FEE_RATE * 2, -cap)
+            cap   += pnl
             ts_now = datetime.now(timezone.utc)
 
             rec = dict(timestamp=str(ts_now), coin=coin, direction=d,
@@ -383,14 +422,13 @@ def check_intrabar_sl(ex, state: dict, best: dict):
                        pnl_usdt=round(pnl, 4), capital=round(cap, 4))
             cs["trades"].append(rec)
             _log_trade(rec)
-            tag = "TP" if reason == "TP" else "SL"
-            print(f"  \u26a1 INTRABAR {tag:2s}  {coin.upper():5s}  {d.upper()}"
-                  f"  high={f_high:.4f}  low={f_low:.4f}  xp={xp:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
+            print(f"  ⚡ INTRABAR {reason:2s}  {coin.upper():5s}  {d.upper()}"
+                  f"  xp={xp:.4f}  pnl=${pnl:+.2f}  cap=${cap:.0f}")
 
             cs["capital"]  = cap
             cs["peak_cap"] = max(cs["peak_cap"], cap)
-            cs.update({"in_trade": False, "trail_active": False, "open_time": None,
-                       "bars_in_trade": 0, "partial_done": False})
+            cs.update({"in_trade": False, "open_time": None,
+                       "em_partial_done": False, "em_trail_active": False})
             params = best.get(coin, {}).get("params", {})
             cs["cooldown_remaining"] = params.get("COOLDOWN_BARS", 0)
             changed = True
@@ -400,19 +438,19 @@ def check_intrabar_sl(ex, state: dict, best: dict):
         save_state(state)
 
 
-# ── Scheduling ────────────────────────────────────────────────────────────────
+# ---- Scheduling --------------------------------------------------------------
 def seconds_to_next_candle() -> float:
     now       = datetime.now(timezone.utc)
     next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return max((next_hour - now).total_seconds() + SLEEP_BUFFER_SEC, 0)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ---- Entry point -------------------------------------------------------------
 def main():
     reset = "--reset" in sys.argv
 
     print("╔═══════════════════════════════════════════════════════════╗")
-    print("║   PAPER TRADING ENGINE — Breakout Strategy                ║")
+    print("║   PAPER TRADING ENGINE — Breakout Strategy v2             ║")
     print(f"║   Testnet : {str(USE_TESTNET):<49}║")
     print(f"║   Capital : ${INITIAL_CAPITAL:,.0f} / coin{' '*(44 - len(f'{INITIAL_CAPITAL:,.0f}'))}║")
     print(f"║   State   : {str(STATE_FILE):<49}║")
@@ -434,7 +472,7 @@ def main():
     while True:
         wait = seconds_to_next_candle()
         nxt  = (datetime.now(timezone.utc) + timedelta(seconds=wait)).strftime("%H:%M:%S UTC")
-        print(f"  \u23f1  Next cycle in {wait/60:.1f} min  ({nxt})")
+        print(f"  ⏱  Next cycle in {wait/60:.1f} min  ({nxt})")
         slept = 0
         while slept < wait - 1:
             chunk  = min(INTRABAR_CHECK_INTERVAL, wait - slept)
