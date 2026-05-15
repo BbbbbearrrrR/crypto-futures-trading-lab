@@ -54,8 +54,8 @@ STATE_FILE        = _HERE / "real_state_boll_scalp_1h.json"
 TRADE_LOG_FILE    = _HERE / "real_trades_boll_scalp_1h.csv"
 BEST_PARAMS_FILE  = _ROOT / "results/boll_scalp_1h/best_params.json"
 
-API_KEY    = os.getenv("BINANCE_API_KEY", "")
-API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+API_KEY    = os.getenv("BINANCE_REAL_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_REAL_API_SECRET", "")
 
 COINS = list(bs.COINS)
 
@@ -542,7 +542,7 @@ def main():
     print("╚═══════════════════════════════════════════════════════════╝\n")
 
     if not API_KEY and not DRY_RUN:
-        print("ERROR: BINANCE_API_KEY not set.")
+        print("ERROR: BINANCE_REAL_API_KEY not set.")
         sys.exit(1)
 
     if not BEST_PARAMS_FILE.exists():
