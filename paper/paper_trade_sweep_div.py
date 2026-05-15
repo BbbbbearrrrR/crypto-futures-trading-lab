@@ -42,8 +42,8 @@ STATE_FILE       = _HERE / "paper_state_sweep_div.json"
 TRADE_LOG_FILE   = _HERE / "paper_trades_sweep_div.csv"
 BEST_PARAMS_FILE = _ROOT / "results/sweep_div/best_params.json"
 
-API_KEY    = os.getenv("BINANCE_API_KEY", "")
-API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+API_KEY    = os.getenv("BINANCE_TESTNET_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_TESTNET_API_SECRET", "")
 
 COINS = list(sd.COINS)
 

@@ -50,8 +50,8 @@ STATE_FILE       = _HERE / "paper_state_boll_scalp_1h.json"
 TRADE_LOG_FILE   = _HERE / "paper_trades_boll_scalp_1h.csv"
 BEST_PARAMS_FILE = _ROOT / "results/boll_scalp_1h/best_params.json"
 
-API_KEY    = os.getenv("BINANCE_API_KEY", "")
-API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+API_KEY    = os.getenv("BINANCE_TESTNET_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_TESTNET_API_SECRET", "")
 
 COINS = bs.COINS   # includes BTC
 

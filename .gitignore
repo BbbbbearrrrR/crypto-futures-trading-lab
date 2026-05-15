@@ -24,5 +24,11 @@ Thumbs.db
 paper/paper_state_*.json
 paper/paper_trades_*.csv
 paper/*.log
+
+# Live trading runtime artifacts
+live/live_state_*.json
+live/live_trades_*.csv
+live/*.log
+
 logs/
 .env

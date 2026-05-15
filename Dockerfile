@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Runtime dirs (will be overridden by volumes in production)
-RUN mkdir -p logs paper data results
+RUN mkdir -p logs paper live data results
 
 EXPOSE 5050
 

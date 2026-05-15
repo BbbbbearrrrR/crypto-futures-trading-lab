@@ -1,0 +1,97 @@
+{
+  "btc": {
+    "best_calmar": -0.0799,
+    "params": {
+      "LEVERAGE": 10,
+      "BASE_RISK": 0.01,
+      "SWEEP_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_ATR_MULT": 1.0,
+      "TP_RR": 2.0,
+      "MACD_FAST": 12,
+      "MACD_SLOW": 26,
+      "MACD_SIGNAL": 9,
+      "USE_DIV_FILTER": true,
+      "DIV_LOOKBACK": 10,
+      "USE_FVG_FILTER": true,
+      "FVG_MAX_AGE": 3,
+      "MAX_HOLD_BARS": 24
+    }
+  },
+  "eth": {
+    "best_calmar": 0.1899,
+    "params": {
+      "LEVERAGE": 3,
+      "BASE_RISK": 0.01,
+      "SWEEP_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_ATR_MULT": 1.5,
+      "TP_RR": 2.0,
+      "MACD_FAST": 12,
+      "MACD_SLOW": 26,
+      "MACD_SIGNAL": 9,
+      "USE_DIV_FILTER": false,
+      "DIV_LOOKBACK": 5,
+      "USE_FVG_FILTER": true,
+      "FVG_MAX_AGE": 3,
+      "MAX_HOLD_BARS": 96
+    }
+  },
+  "sui": {
+    "best_calmar": -0.0024,
+    "params": {
+      "LEVERAGE": 3,
+      "BASE_RISK": 0.01,
+      "SWEEP_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_ATR_MULT": 1.5,
+      "TP_RR": 3.0,
+      "MACD_FAST": 12,
+      "MACD_SLOW": 26,
+      "MACD_SIGNAL": 9,
+      "USE_DIV_FILTER": true,
+      "DIV_LOOKBACK": 10,
+      "USE_FVG_FILTER": false,
+      "FVG_MAX_AGE": 3,
+      "MAX_HOLD_BARS": 48
+    }
+  },
+  "sol": {
+    "best_calmar": 0.0839,
+    "params": {
+      "LEVERAGE": 3,
+      "BASE_RISK": 0.01,
+      "SWEEP_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_ATR_MULT": 1.5,
+      "TP_RR": 2.0,
+      "MACD_FAST": 12,
+      "MACD_SLOW": 26,
+      "MACD_SIGNAL": 9,
+      "USE_DIV_FILTER": true,
+      "DIV_LOOKBACK": 10,
+      "USE_FVG_FILTER": true,
+      "FVG_MAX_AGE": 10,
+      "MAX_HOLD_BARS": 96
+    }
+  },
+  "hype": {
+    "best_calmar": 2.1937,
+    "params": {
+      "LEVERAGE": 3,
+      "BASE_RISK": 0.02,
+      "SWEEP_PERIOD": 10,
+      "ATR_PERIOD": 14,
+      "SL_ATR_MULT": 1.0,
+      "TP_RR": 2.0,
+      "MACD_FAST": 12,
+      "MACD_SLOW": 26,
+      "MACD_SIGNAL": 9,
+      "USE_DIV_FILTER": true,
+      "DIV_LOOKBACK": 10,
+      "USE_FVG_FILTER": true,
+      "FVG_MAX_AGE": 10,
+      "MAX_HOLD_BARS": 24
+    }
+  }
+}

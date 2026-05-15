@@ -9,6 +9,7 @@ services:
       - .env          # BINANCE_API_KEY, BINANCE_API_SECRET
     volumes:
       - ./paper:/app/paper          # state + trade logs (persistent)
+      - ./live:/app/live            # live state + trade logs (persistent)
       - ./data:/app/data            # OHLCV CSVs (persistent)
       - ./logs:/app/logs            # process logs (persistent)
       - ./results:/app/results      # backtest/tune results (persistent)
