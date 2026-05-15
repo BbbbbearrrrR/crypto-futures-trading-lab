@@ -25,6 +25,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+from backtest.exit_manager import ExitManager
 
 _ROOT       = Path(__file__).resolve().parent.parent
 DATA_DIR    = _ROOT / "data"
@@ -132,6 +133,18 @@ def prepare(df_1h: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── Backtest ──────────────────────────────────────────────────────────────────
+def _exit_params() -> dict:
+    return {
+        "USE_PARTIAL_TP": USE_PARTIAL_TP,
+        "PARTIAL_FRAC":   0.5,
+        "USE_TRAIL":      False,
+        "USE_TREND_EXIT": False,
+        "USE_VOL_DIV":    VOL_DIV_PERIOD > 0,
+        "MAX_HOLD_BARS":  MAX_HOLD_BARS,
+        "FEE_RATE":       FEE_RATE,
+    }
+
+
 def preload_data():
     global _RAW_DATA
     for _, coin in COINS:
@@ -151,15 +164,11 @@ def run_backtest(symbol: str, coin: str):
     trades   = []
 
     in_trade      = False
+    em            = None
     direction     = None
     entry_price   = 0.0
-    sl_price      = 0.0
-    tp1_price     = 0.0
-    tp2_price     = 0.0
-    notional      = 0.0
+    notional_full = 0.0
     notional_rem  = 0.0
-    partial_done  = False
-    bars_held     = 0
 
     warmup = max(BB_PERIOD, ATR_PERIOD, TREND_EMA_PERIOD) + 2
 
@@ -171,64 +180,38 @@ def run_backtest(symbol: str, coin: str):
             break
 
         # ── Exit ─────────────────────────────────────────────────────────────
-        if in_trade:
-            bars_held += 1
+        if in_trade and em is not None:
+            result = em.update(row)
 
-            hit_tp1 = (not partial_done and
-                       (row["high"] >= tp1_price if direction == "long" else row["low"] <= tp1_price))
-            hit_tp2 = (row["high"] >= tp2_price if direction == "long" else row["low"] <= tp2_price)
-            hit_sl  = (row["low"]  <= sl_price  if direction == "long" else row["high"] >= sl_price)
-            hit_vol_div = (
-                (direction == "long"  and bool(row["vol_div_long"])) or
-                (direction == "short" and bool(row["vol_div_short"]))
-            )
-            expired = bars_held >= MAX_HOLD_BARS
-
-            # Partial TP1 — close 50%
-            if hit_tp1 and USE_PARTIAL_TP and not partial_done:
-                half = notional_rem * 0.5
-                pct  = ((tp1_price - entry_price) / entry_price if direction == "long"
-                        else (entry_price - tp1_price) / entry_price)
-                pnl  = half * pct - half * FEE_RATE
-                capital += pnl
-                peak_cap = max(peak_cap, capital)
+            if result.partial:
+                pt    = result.partial
+                cn    = notional_full * pt.frac
+                pnl_p = cn * pt.pnl_frac - cn * FEE_RATE * 2
+                capital  += pnl_p
+                peak_cap  = max(peak_cap, capital)
+                notional_rem = notional_full * (1.0 - pt.frac)
                 trades.append({
                     "exit_time": ts, "direction": direction,
-                    "entry_price": round(entry_price, 6), "exit_price": round(tp1_price, 6),
-                    "notional": round(half, 4), "exit_reason": "TP1",
+                    "entry_price": round(entry_price, 6), "exit_price": round(pt.exit_price, 6),
+                    "notional": round(cn, 4), "exit_reason": pt.reason,
+                    "pnl_usdt": round(pnl_p, 4), "capital": round(capital, 4),
+                    "drawdown": round((peak_cap - capital) / peak_cap, 6),
+                })
+
+            if result.closed:
+                pnl = notional_rem * result.pnl_frac - notional_rem * FEE_RATE * 2
+                pnl = max(pnl, -capital)
+                capital  += pnl
+                peak_cap  = max(peak_cap, capital)
+                trades.append({
+                    "exit_time": ts, "direction": direction,
+                    "entry_price": round(entry_price, 6), "exit_price": round(result.exit_price, 6),
+                    "notional": round(notional_rem, 4), "exit_reason": result.reason,
                     "pnl_usdt": round(pnl, 4), "capital": round(capital, 4),
                     "drawdown": round((peak_cap - capital) / peak_cap, 6),
                 })
-                notional_rem -= half
-                partial_done  = True
-                sl_price      = entry_price  # move SL to breakeven
-
-            # Full exit: TP2, SL, vol-div early TP, or timeout
-            if in_trade and (hit_tp2 or hit_sl or hit_vol_div or expired):
-                if hit_tp2:
-                    exit_price, exit_reason = tp2_price, "TP2"
-                elif hit_sl:
-                    exit_price, exit_reason = sl_price, "SL"
-                elif hit_vol_div:
-                    exit_price, exit_reason = row["close"], "VOL_DIV"
-                else:
-                    exit_price, exit_reason = row["close"], "TIMEOUT"
-
-                pct     = ((exit_price - entry_price) / entry_price if direction == "long"
-                           else (entry_price - exit_price) / entry_price)
-                pnl     = notional_rem * pct - notional_rem * FEE_RATE * 2
-                pnl     = max(pnl, -capital)
-                capital += pnl
-                peak_cap = max(peak_cap, capital)
-                trades.append({
-                    "exit_time": ts, "direction": direction,
-                    "entry_price": round(entry_price, 6), "exit_price": round(exit_price, 6),
-                    "notional": round(notional_rem, 4), "exit_reason": exit_reason,
-                    "pnl_usdt": round(pnl, 4), "capital": round(capital, 4),
-                    "drawdown": round((peak_cap - capital) / peak_cap, 6),
-                })
-                in_trade     = False
-                partial_done = False
+                in_trade = False
+                em       = None
 
         # ── Entry ─────────────────────────────────────────────────────────────
         if not in_trade:
@@ -267,11 +250,17 @@ def run_backtest(symbol: str, coin: str):
                 if sl_pct < 1e-6:
                     continue
 
-                risk_amt     = capital * BASE_RISK
-                notional     = min(risk_amt / sl_pct, capital * LEVERAGE)
-                notional_rem = notional
-                partial_done = False
-                bars_held    = 0
+                risk_amt      = capital * BASE_RISK
+                notional_full = min(risk_amt / sl_pct, capital * LEVERAGE)
+                notional_rem  = notional_full
+                em = ExitManager(
+                    direction        = direction,
+                    entry_price      = entry_price,
+                    sl_price         = sl_price,
+                    tp_price         = tp2_price,
+                    params           = _exit_params(),
+                    partial_tp_price = tp1_price,
+                )
                 in_trade     = True
 
     if not trades:

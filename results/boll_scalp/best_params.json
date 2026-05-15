@@ -1,0 +1,77 @@
+{
+  "hype": {
+    "best_calmar": 792.6259,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.05,
+      "BB_PERIOD": 40,
+      "BB_STD": 2.0,
+      "ATR_PERIOD": 14,
+      "SL_TP_RATIO": 0.5,
+      "TREND_EMA_PERIOD": 100,
+      "USE_PARTIAL_TP": false,
+      "MAX_HOLD_BARS": 24,
+      "VOL_DIV_PERIOD": 0
+    }
+  },
+  "sui": {
+    "best_calmar": 18.1079,
+    "params": {
+      "LEVERAGE": 10,
+      "BASE_RISK": 0.05,
+      "BB_PERIOD": 40,
+      "BB_STD": 2.5,
+      "ATR_PERIOD": 14,
+      "SL_TP_RATIO": 1.0,
+      "TREND_EMA_PERIOD": 200,
+      "USE_PARTIAL_TP": false,
+      "MAX_HOLD_BARS": 24,
+      "VOL_DIV_PERIOD": 0
+    }
+  },
+  "eth": {
+    "best_calmar": 137.0898,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.05,
+      "BB_PERIOD": 40,
+      "BB_STD": 2.5,
+      "ATR_PERIOD": 14,
+      "SL_TP_RATIO": 1.5,
+      "TREND_EMA_PERIOD": 100,
+      "USE_PARTIAL_TP": true,
+      "MAX_HOLD_BARS": 24,
+      "VOL_DIV_PERIOD": 0
+    }
+  },
+  "sol": {
+    "best_calmar": 115.9206,
+    "params": {
+      "LEVERAGE": 10,
+      "BASE_RISK": 0.05,
+      "BB_PERIOD": 40,
+      "BB_STD": 2.5,
+      "ATR_PERIOD": 14,
+      "SL_TP_RATIO": 1.5,
+      "TREND_EMA_PERIOD": 200,
+      "USE_PARTIAL_TP": false,
+      "MAX_HOLD_BARS": 24,
+      "VOL_DIV_PERIOD": 0
+    }
+  },
+  "btc": {
+    "best_calmar": 22.6466,
+    "params": {
+      "LEVERAGE": 20,
+      "BASE_RISK": 0.05,
+      "BB_PERIOD": 40,
+      "BB_STD": 2.5,
+      "ATR_PERIOD": 14,
+      "SL_TP_RATIO": 1.0,
+      "TREND_EMA_PERIOD": 200,
+      "USE_PARTIAL_TP": false,
+      "MAX_HOLD_BARS": 48,
+      "VOL_DIV_PERIOD": 0
+    }
+  }
+}

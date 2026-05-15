@@ -73,7 +73,7 @@ class PartialFill:
 class ExitResult:
     closed: bool = False
     exit_price: float = 0.0
-    reason: str = ""          # "TP" | "SL" | "TRAIL_SL" | "TIMEOUT" | "TREND_EXIT"
+    reason: str = ""          # "TP" | "SL" | "TRAIL_SL" | "TIMEOUT" | "TREND_EXIT" | "VOL_DIV"
     pnl_frac: float = 0.0     # pnl per unit notional (before fee)
     partial: Optional[PartialFill] = None   # filled if partial TP fired this bar
 
@@ -102,6 +102,7 @@ class ExitManager:
         "TP_RR":           3.0,
         "MAX_HOLD_BARS":   0,
         "USE_TREND_EXIT":  False,
+        "USE_VOL_DIV":     False,
         "FEE_RATE":        0.0005,
     }
 
@@ -112,6 +113,7 @@ class ExitManager:
         sl_price: float,
         tp_price: float,
         params: dict | None = None,
+        partial_tp_price: float | None = None,
     ):
         self._p = {**self.DEFAULTS, **(params or {})}
 
@@ -133,9 +135,12 @@ class ExitManager:
                              else entry_price - self.sl_dist * rr)
 
         # ── Partial TP ────────────────────────────────────────────────────────
-        r = self._p["PARTIAL_R"]
-        self.partial_tp_price = (entry_price + self.sl_dist * r if direction == "long"
-                                 else entry_price - self.sl_dist * r)
+        if partial_tp_price is not None:
+            self.partial_tp_price = partial_tp_price
+        else:
+            r = self._p["PARTIAL_R"]
+            self.partial_tp_price = (entry_price + self.sl_dist * r if direction == "long"
+                                     else entry_price - self.sl_dist * r)
         self.partial_done = False
 
         # ── Trail ─────────────────────────────────────────────────────────────
@@ -183,7 +188,17 @@ class ExitManager:
                 result.pnl_frac   = self._pnl_frac(float(row["close"]))
                 return result
 
-        # ── 5. Check TP / SL ─────────────────────────────────────────────────
+        # ── 5. Check vol_div exit ────────────────────────────────────────────
+        if self._p["USE_VOL_DIV"]:
+            vd_key = "vol_div_long" if self.direction == "long" else "vol_div_short"
+            if row.get(vd_key, False):
+                result.closed     = True
+                result.exit_price = float(row["close"])
+                result.reason     = "VOL_DIV"
+                result.pnl_frac   = self._pnl_frac(float(row["close"]))
+                return result
+
+        # ── 6. Check TP / SL ─────────────────────────────────────────────────
         hit_tp, hit_sl = self._check_tp_sl(row)
 
         if hit_tp:

@@ -37,6 +37,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+from backtest.exit_manager import ExitManager
 
 _ROOT            = Path(__file__).resolve().parent.parent
 DATA_DIR         = _ROOT / "data"
@@ -201,6 +202,18 @@ def _find_recent_fvg(df: pd.DataFrame, i: int, direction: str) -> bool:
     return False
 
 
+def _exit_params() -> dict:
+    return {
+        "USE_PARTIAL_TP": False,
+        "USE_TRAIL":      False,
+        "USE_TREND_EXIT": False,
+        "USE_VOL_DIV":    False,
+        "TP_RR":          TP_RR,
+        "MAX_HOLD_BARS":  MAX_HOLD_BARS,
+        "FEE_RATE":       FEE_RATE,
+    }
+
+
 # ── Backtest ──────────────────────────────────────────────────────────────────
 def preload_data():
     global _RAW_DATA
@@ -223,12 +236,10 @@ def run_backtest(symbol: str, coin: str):
     trades    = []
 
     in_trade    = False
+    em          = None
     direction   = None
     entry_price = 0.0
-    sl_price    = 0.0
-    tp_price    = 0.0
     notional    = 0.0
-    bars_held   = 0
 
     warmup = max(SWEEP_PERIOD, MACD_SLOW + MACD_SIGNAL, ATR_PERIOD, FVG_MAX_AGE) + 5
 
@@ -240,41 +251,27 @@ def run_backtest(symbol: str, coin: str):
             break
 
         # ── Exit ─────────────────────────────────────────────────────────────
-        if in_trade:
-            bars_held += 1
+        if in_trade and em is not None:
+            result = em.update(row)
 
-            hit_tp  = (row["high"] >= tp_price if direction == "long"
-                       else row["low"]  <= tp_price)
-            hit_sl  = (row["low"]  <= sl_price if direction == "long"
-                       else row["high"] >= sl_price)
-            expired = MAX_HOLD_BARS > 0 and bars_held >= MAX_HOLD_BARS
-
-            if hit_tp or hit_sl or expired:
-                if hit_tp:
-                    exit_price, exit_reason = tp_price, "TP"
-                elif hit_sl:
-                    exit_price, exit_reason = sl_price, "SL"
-                else:
-                    exit_price, exit_reason = row["close"], "TIMEOUT"
-
-                pct     = ((exit_price - entry_price) / entry_price if direction == "long"
-                           else (entry_price - exit_price) / entry_price)
-                pnl     = notional * pct - notional * FEE_RATE * 2
-                pnl     = max(pnl, -capital)
-                capital += pnl
-                peak_cap = max(peak_cap, capital)
+            if result.closed:
+                pnl = notional * result.pnl_frac - notional * FEE_RATE * 2
+                pnl = max(pnl, -capital)
+                capital  += pnl
+                peak_cap  = max(peak_cap, capital)
                 trades.append({
                     "exit_time":   ts,
                     "direction":   direction,
                     "entry_price": round(entry_price, 6),
-                    "exit_price":  round(exit_price, 6),
+                    "exit_price":  round(result.exit_price, 6),
                     "notional":    round(notional, 4),
-                    "exit_reason": exit_reason,
+                    "exit_reason": result.reason,
                     "pnl_usdt":    round(pnl, 4),
                     "capital":     round(capital, 4),
                     "drawdown":    round((peak_cap - capital) / peak_cap, 6),
                 })
                 in_trade = False
+                em       = None
 
         # ── Entry ─────────────────────────────────────────────────────────────
         if not in_trade:
@@ -330,11 +327,14 @@ def run_backtest(symbol: str, coin: str):
             if notional < 1:
                 continue
 
-            # Entry fee
-            capital  -= notional * FEE_RATE
-            peak_cap  = max(peak_cap, capital)
+            em        = ExitManager(
+                direction   = direction,
+                entry_price = entry_price,
+                sl_price    = sl_price,
+                tp_price    = tp_price,
+                params      = _exit_params(),
+            )
             in_trade  = True
-            bars_held = 0
 
     if not trades:
         return None, pd.DataFrame()
