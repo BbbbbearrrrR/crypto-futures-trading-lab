@@ -53,7 +53,7 @@ SLEEP_BUFFER_SEC = 15
 INTRABAR_INTERVAL = 60           # seconds between intrabar position checks
 
 STATE_FILE       = _HERE / "real_state_breakout.json"
-TRADE_LOG_FILE   = _HERE / "real_trades_breakout.csv"
+TRADE_LOG_FILE   = _ROOT / "results/breakout/real_trades_breakout.csv"
 BEST_PARAMS_FILE = _ROOT / "results/breakout/best_params.json"
 
 API_KEY    = os.getenv("BINANCE_REAL_API_KEY", "")
@@ -420,20 +420,6 @@ def print_report(state: dict):
     total_ret = (total_cap - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
     print(f"{'─'*65}")
     print(f"  TOTAL  initial=${INITIAL_CAPITAL:.0f}  now=${total_cap:>9.2f}  ret={total_ret:>+7.2f}%")
-    all_trades = sorted(
-        [t for _, coin in COINS for t in state[coin]["trades"]],
-        key=lambda t: t.get("timestamp", ""), reverse=True,
-    )
-    if all_trades:
-        recent = all_trades[:10]
-        print(f"{'─'*65}")
-        print(f"  RECENT TRADES (last {len(recent)})")
-        for t in recent:
-            sym  = "✓" if t.get("exit_reason") == "TP" else "✗"
-            ts_s = str(t.get("timestamp", ""))[:16]
-            print(f"  {t['coin'].upper():5s}  {t['direction'].upper():5s}"
-                  f"  in={t['entry_price']:>10.4f}  out={t['exit_price']:>10.4f}"
-                  f"  pnl=${t['pnl_usdt']:>+8.2f}  {sym}{t.get('exit_reason','?'):2s}  {ts_s}")
     print(f"{'═'*65}\n")
 
 

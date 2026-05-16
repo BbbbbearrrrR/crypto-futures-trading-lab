@@ -27,13 +27,15 @@ paper/*.log
 
 # Live trading runtime artifacts
 live/live_state_*.json
-live/live_trades_*.csv
 live/*.log
 
 # Real trading runtime artifacts
 real/real_state_*.json
-real/real_trades_*.csv
 real/*.log
+
+# Live/real trade history (in results/)
+results/*/live_trades_*.csv
+results/*/real_trades_*.csv
 
 logs/
 .env
