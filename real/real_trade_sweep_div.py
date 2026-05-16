@@ -380,15 +380,27 @@ def print_report(state: dict):
     total_ret = (total_cap - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
     print(f"{'─'*65}")
     print(f"  TOTAL  initial=${INITIAL_CAPITAL:.0f}  now=${total_cap:>9.2f}  ret={total_ret:>+7.2f}%")
+    all_trades = sorted(
+        [t for _, coin in COINS for t in state[coin]["trades"]],
+        key=lambda t: t.get("timestamp", ""), reverse=True,
+    )
+    if all_trades:
+        recent = all_trades[:10]
+        print(f"{'─'*65}")
+        print(f"  RECENT TRADES (last {len(recent)})")
+        for t in recent:
+            sym  = "✓" if t.get("exit_reason") == "TP" else "✗"
+            ts_s = str(t.get("timestamp", ""))[:16]
+            print(f"  {t['coin'].upper():5s}  {t['direction'].upper():5s}"
+                  f"  in={t['entry_price']:>10.4f}  out={t['exit_price']:>10.4f}"
+                  f"  pnl=${t['pnl_usdt']:>+8.2f}  {sym}{t.get('exit_reason','?'):2s}  {ts_s}")
     print(f"{'═'*65}\n")
 
 
 # ── Main cycle ────────────────────────────────────────────────────────────────
 def run_cycle(ex: ccxt.binanceusdm, state: dict, best: dict):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    print(f"\n{'─'*65}")
-    print(f"  CYCLE  {now}")
-    print(f"{'─'*65}")
+    print(f"\n── CYCLE {now} ──")
 
     for symbol, coin in COINS:
         entry  = best.get(coin, {})
@@ -419,10 +431,11 @@ def run_cycle(ex: ccxt.binanceusdm, state: dict, best: dict):
                 ss  = bool(row.get("sweep_short", False))
                 db  = bool(row.get("div_bull",    False))
                 dbe = bool(row.get("div_bear",    False))
-                print(f"  [{coin.upper()}]  close={row['close']:.4f}"
-                      f"  atr={row.get('atr', 0):.4f}"
-                      f"  sweep={'L' if sl else 'S' if ss else '-'}"
-                      f"  div={'↑' if db else '↓' if dbe else '-'}")
+                if sl or ss or db or dbe:
+                    print(f"  [{coin.upper()}]  close={row['close']:.4f}"
+                          f"  atr={row.get('atr', 0):.4f}"
+                          f"  sweep={'L' if sl else 'S' if ss else '-'}"
+                          f"  div={'↑' if db else '↓' if dbe else '-'}")
                 process_bar(ex, cs, row, df, i, params, coin, symbol, ts)
                 cs["last_processed_ts"] = str(ts)
 
